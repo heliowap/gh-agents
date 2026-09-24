@@ -42,6 +42,9 @@ user can see.
 | `runner/**`, `runtime/**` | `docs/conventions/fleet.md` |
 | `agents/**`, `skills/**` | `docs/conventions/agents-skills.md` |
 | README, `docs/**`, comments | `docs/conventions/prose.md` |
+| writing code or tests | `docs/conventions/testing.md` (TDD, seams, complexity budget) |
+| designing an interface or module | `docs/conventions/design.md` (deep modules) |
+| declaring done, opening a PR | `docs/conventions/dod.md` (per-type DoD, feedback loops) |
 | visible behaviour, UI text, scope calls | `PRODUCT.md` |
 | why a decision exists | `docs/specs/` |
 
@@ -52,7 +55,7 @@ actionlint .github/workflows/*.yml
 shellcheck runner/*.sh
 ```
 
-`agents/opencode.json` validates against the opencode schema. Workflow
-behaviour is verified on a real caller repo before a tag moves: open a test
-PR, comment `/oc`, break CI. A change that cannot be exercised says so in
-the PR description instead of claiming it works.
+`agents/opencode.json` validates against the opencode schema. The full DoD
+per change type — and which feedback loop a red check belongs to — lives in
+`docs/conventions/dod.md`. A check that applies and could not run is a
+failure, never a skip.

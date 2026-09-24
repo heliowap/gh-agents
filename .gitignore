@@ -1,0 +1,13 @@
+# Harness/agent tooling instalado localmente (impeccable, testsprite, hooks).
+# Conteúdo versionável do repo vive em docs/, agents/, skills/, runner/,
+# runtime/, .github/. Skills do projeto entram em skills/ por decisão própria.
+.agents/
+.claude/
+.codex/
+.cursor/
+.impeccable/
+.opencode/
+.windsurf/
+
+# Runtime/local
+*.local.json

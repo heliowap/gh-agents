@@ -1,12 +1,25 @@
 # Harness/agent tooling instalado localmente (impeccable, testsprite, hooks).
 # Conteúdo versionável do repo vive em docs/, agents/, skills/, runner/,
 # runtime/, .github/. Skills do projeto entram em skills/ por decisão própria.
-.agents/
-.claude/
+#
+# Exceção: as maintainer skills são versionadas — cópia canônica em
+# .agents/skills/<name>/ e symlinks por harness (.claude/.cursor/.opencode).
+# Apenas `impeccable` continua local em cada skills dir. Como adicionar:
+# docs/conventions/maintainer-skills.md
+.agents/*
+!.agents/skills/
+.agents/skills/impeccable/
+.claude/*
+!.claude/skills/
+.claude/skills/impeccable/
 .codex/
-.cursor/
+.cursor/*
+!.cursor/skills/
+.cursor/skills/impeccable/
 .impeccable/
-.opencode/
+.opencode/*
+!.opencode/skills/
+.opencode/skills/impeccable/
 .windsurf/
 
 # Runtime/local

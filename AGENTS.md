@@ -41,6 +41,7 @@ user can see.
 | `.github/workflows/**` | `docs/conventions/workflows.md` |
 | `runner/**`, `runtime/**` | `docs/conventions/fleet.md` |
 | `agents/**`, `skills/**` | `docs/conventions/agents-skills.md` |
+| `.agents/skills/**` (maintainer runbooks) | `docs/conventions/maintainer-skills.md` |
 | README, `docs/**`, comments | `docs/conventions/prose.md` |
 | writing code or tests | `docs/conventions/testing.md` (TDD, seams, complexity budget) |
 | designing an interface or module | `docs/conventions/design.md` (deep modules) |

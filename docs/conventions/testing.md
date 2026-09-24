@@ -20,10 +20,35 @@ Per content type:
 | `.github/workflows/` | the workflow's observable behaviour on a caller repo | `actionlint` locally; e2e on a real test repo before the tag moves |
 | `agents/opencode.json` | the file itself | schema validation in CI |
 | `skills/*.md` | an agent session that loads it | no unit test — behaviour eval, see `agents-skills.md` |
+| dashboard SPA | user flow in a real browser | TestSprite `--local` — see below |
 
 A fix comes with a test that fails without it. A feature covers each mode it
 touches. Expected values come from an independent source of truth — never
 recomputed the way the code does.
+
+## TestSprite (dashboard e2e)
+
+TestSprite covers the layer no unit test reaches: SPA flows in a real
+browser. The rules for this repo:
+
+- **Frontend only.** The panel is tailnet-only; TestSprite's cloud cannot
+  reach it, so runs always use `--local <port>` (tunnel; the `run:tunnel`
+  scope is already on the key). Its *backend* tests run from their sandbox
+  over public HTTP — they cannot reach the tailnet either, so the Go API is
+  covered by `go test`, never by TestSprite.
+- **Auth**: the panel password goes in via `testsprite project credential`
+  or `auto-auth` — never hardcoded in a plan file.
+- **Credits**: a V3 frontend run costs 0.5 credit. Smoke-run the 2–3
+  highest-value flows; never `--all` unattended. Check `testsprite usage`
+  before sizing a suite.
+- **Verify loop**: after a UI change, run the test covering the touched flow
+  to a verdict and inspect failure artifacts before reporting done — the
+  full loop is the `testsprite-verify` rule installed in this repo
+  (`.windsurf/rules/`; harnesses that don't read it get the same rules here).
+- **Onboard**: first suite follows the `testsprite-onboard` rule —
+  hand-authored plans, one JSON per flow, each carrying its `projectId`.
+- CLI lives at `~/.local/bin/testsprite`; `testsprite auth status` before a
+  run. Missing credentials mean "unverified" — reported as such, per `dod.md`.
 
 ## Complexity budget
 

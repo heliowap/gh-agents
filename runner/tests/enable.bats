@@ -84,8 +84,11 @@ EOF
 }
 
 @test "enable-repo is idempotent on a configured runner" {
-  scope="owner--repo"; mkdir -p "$GH_AGENTS_HOME/runners/$scope/1" "$GH_AGENTS_HOME/runners/$scope/2"
-  touch "$GH_AGENTS_HOME/runners/$scope/1/.runner" "$GH_AGENTS_HOME/runners/$scope/2/.runner"
+  scope="owner--repo"
+  for n in 1 2; do
+    mkdir -p "$GH_AGENTS_HOME/runners/$scope/$n/bin"
+    touch "$GH_AGENTS_HOME/runners/$scope/$n/.runner" "$GH_AGENTS_HOME/runners/$scope/$n/bin/runsvc.sh"
+  done
   run "$REPO_ROOT/runner/enable-repo.sh" owner/repo 2
   [ "$status" -eq 0 ]
   [[ "$output" == *"já configurado"* || "$output" == *"already"* ]]

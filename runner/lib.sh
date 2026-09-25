@@ -52,6 +52,9 @@ unit_name() { echo "actions.runner.$1.service"; }   # $1 = runner name (<escopo>
 
 install_user_unit() {                              # <dir> <runner-name>
   local dir="$1" name; name="$(unit_name "$2")"
+  # svc.sh's only privileged step is copying runsvc.sh to the runner root —
+  # as the owning user we just copy it ourselves.
+  [ -f "$dir/runsvc.sh" ] || install -m 0755 "$dir/bin/runsvc.sh" "$dir/runsvc.sh"
   mkdir -p "$UNIT_DIR"
   cat > "$UNIT_DIR/$name" <<EOF
 [Unit]

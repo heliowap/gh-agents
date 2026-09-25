@@ -10,7 +10,7 @@ echo "==> runners locais em $RUNNERS_DIR"
 [ -d "$RUNNERS_DIR" ] && find "$RUNNERS_DIR" -mindepth 2 -maxdepth 2 -type d | sort || echo "(nenhum)"
 
 echo "==> units actions.runner.*"
-systemctl list-units --all 'actions.runner.*' --no-legend 2>/dev/null || echo "(nenhuma)"
+systemctl --user list-units --all 'actions.runner.*' --no-legend 2>/dev/null || echo "(nenhuma)"
 
 echo "==> runners registrados (por escopo local)"
 for scope_dir in "$RUNNERS_DIR"/*/; do

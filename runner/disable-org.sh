@@ -25,10 +25,7 @@ for dir in "$BASE"/*/; do
       token="$(org_removal_token "$ORG")"
       ./config.sh remove --token "$token"
     fi
-    if [ -f ./svc.sh ]; then
-      sudo ./svc.sh stop || true
-      sudo ./svc.sh uninstall || true
-    fi
+    uninstall_user_unit "${SCOPE}-$(basename "${dir%/}")"
   )
   rm -rf "$dir"
 done

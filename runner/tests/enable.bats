@@ -3,6 +3,7 @@
 setup() {
   TEST_HOME="$(mktemp -d)"
   export GH_AGENTS_HOME="$TEST_HOME"
+  export GH_AGENTS_UNIT_DIR="$TEST_HOME/units"
   STUB="$TEST_HOME/bin"; mkdir -p "$STUB"
   export PATH="$STUB:$PATH"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"

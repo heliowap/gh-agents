@@ -43,8 +43,7 @@ for i in $(seq 1 "$N"); do
       --runnergroup "$GROUP_ID" \
       --work _work \
       --replace
-    sudo ./svc.sh install "$USER"
-    sudo ./svc.sh start
+    install_user_unit "$dir" "${SCOPE}-${i}"
   )
 done
 

@@ -4,6 +4,8 @@
 
 GH_AGENTS_HOME="${GH_AGENTS_HOME:-/home/gh-agents}"
 RUNNERS_DIR="$GH_AGENTS_HOME/runners"
+# Units de usuário (systemctl --user) — sem sudo. Override só para testes.
+UNIT_DIR="${GH_AGENTS_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 
 die() { echo "erro: $*" >&2; exit 1; }
 
@@ -44,10 +46,42 @@ ensure_private_runner_group() {
   echo "$id"
 }
 
-# Unit names are whatever svc.sh generated — query, never invent.
+# Units são user services geradas aqui (svc.sh exige root; não usamos).
+# Nome = actions.runner.<runner-name>.service — unit_for consulta, nunca inventa.
+unit_name() { echo "actions.runner.$1.service"; }   # $1 = runner name (<escopo>-<n>)
+
+install_user_unit() {                              # <dir> <runner-name>
+  local dir="$1" name; name="$(unit_name "$2")"
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT_DIR/$name" <<EOF
+[Unit]
+Description=GitHub Actions Runner $2
+After=network-online.target
+
+[Service]
+ExecStart=$dir/runsvc.sh
+WorkingDirectory=$dir
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+
+[Install]
+WantedBy=default.target
+EOF
+  systemctl --user daemon-reload
+  systemctl --user enable --now "$name"
+}
+
+uninstall_user_unit() {                          # <runner-name>
+  local name; name="$(unit_name "$1")"
+  systemctl --user disable --now "$name" 2>/dev/null || true
+  rm -f "$UNIT_DIR/$name"
+  systemctl --user daemon-reload
+}
+
 unit_for() {
   local name
-  name="$(basename "$(dirname "$1")")--$(basename "$1")" 2>/dev/null || true
-  systemctl list-units --all --no-legend 'actions.runner.*' 2>/dev/null \
+  name="$(basename "$(dirname "$1")")-$(basename "$1")" 2>/dev/null || true
+  systemctl --user list-units --all --no-legend 'actions.runner.*' 2>/dev/null \
     | awk '{print $1}' | grep -F "$name" | head -1
 }

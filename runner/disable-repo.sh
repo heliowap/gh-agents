@@ -25,10 +25,7 @@ for dir in "$BASE"/*/; do
       token="$(repo_removal_token "$REPO")"
       ./config.sh remove --token "$token"
     fi
-    if [ -f ./svc.sh ]; then
-      sudo ./svc.sh stop || true
-      sudo ./svc.sh uninstall || true
-    fi
+    uninstall_user_unit "${SCOPE}-$(basename "${dir%/}")"
   )
   rm -rf "$dir"
 done

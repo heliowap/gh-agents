@@ -3,6 +3,7 @@
 setup() {
   TEST_HOME="$(mktemp -d)"
   export GH_AGENTS_HOME="$TEST_HOME"
+  export GH_AGENTS_UNIT_DIR="$TEST_HOME/units"
   STUB="$TEST_HOME/bin"; mkdir -p "$STUB"; export PATH="$STUB:$PATH"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   export CALLS="$TEST_HOME/calls"; : > "$CALLS"
@@ -45,7 +46,7 @@ teardown() { rm -rf "$TEST_HOME"; }
   [ ! -d "$GH_AGENTS_HOME/runners/own--rep/1" ]
   # fleet.md order: registration removal, then units, then dirs
   first_cfg="$(grep -n 'config.sh remove' "$CALLS" | head -1 | cut -d: -f1)"
-  first_svc="$(grep -n 'svc.sh' "$CALLS" | head -1 | cut -d: -f1)"
+  first_svc="$(grep -n 'systemctl --user' "$CALLS" | head -1 | cut -d: -f1)"
   [ -n "$first_cfg" ] && [ -n "$first_svc" ] && [ "$first_cfg" -lt "$first_svc" ]
 }
 

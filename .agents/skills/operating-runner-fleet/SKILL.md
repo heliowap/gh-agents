@@ -19,7 +19,7 @@ host. Authoring rules: `docs/conventions/fleet.md`.
 |---|---|
 | Runner instances | `/home/gh-agents/runners/<escopo>/<n>/` |
 | Scope name `<escopo>` | `org--<org>` or `<owner>--<repo>` |
-| Units | whatever `svc.sh` generates — query, never invent (`systemctl list-units 'actions.runner.*'`) |
+| Units | user services `actions.runner.<name>.service` (`systemctl --user`; needs `loginctl enable-linger gh-agents` once) |
 | Hygiene | `gh-agents-cleanup.timer` — daily, deletes `_work` of runners idle >7d |
 | Sizing | N=2 per scope (jobs are I/O-bound on the LLM API) |
 

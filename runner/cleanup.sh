@@ -11,7 +11,7 @@ for dir in "$RUNNERS_DIR"/*/*/; do
   [ -d "$dir/_work" ] || continue
   unit="$(unit_for "${dir%/}")"
   active="unknown"
-  [ -n "$unit" ] && active="$(systemctl is-active "$unit" 2>/dev/null || echo inactive)"
+  [ -n "$unit" ] && active="$(systemctl --user is-active "$unit" 2>/dev/null || echo inactive)"
   if [ "$active" = "inactive" ] || [ "$active" = "failed" ]; then
     if [ -n "$(find "$dir/_work" -maxdepth 0 -mtime +7 2>/dev/null)" ]; then
       echo "==> removendo $dir/_work (unit ${unit:-desconhecida} $active, >7d)"

@@ -342,5 +342,8 @@ jobs:
             "$RUN_URL" "$RUN_NAME" "$HEAD_SHA" "$RUN_ID" "$PR" "$PR" "$HEAD_SHA")"
           # sed neutralizes workflow commands (`##[error]`, `::error::`) in the
           # failed run's logs so they don't become annotations on THIS run.
+          # Unanchored: agent output may prepend ANSI escapes, and the runner
+          # strips them before command parsing.
           opencode run --model "$MODEL" --agent ci-doctor "$prompt" 2>&1 \
-            | sed -e 's/^##\[/## [/' -e 's/^::/:: /'
+            | sed -e 's/##\[/## [/g' \
+                  -e 's/::\(add-mask\|debug\|error\|warning\|notice\|group\|endgroup\|echo\|stop-commands\)::/:: \1::/g'

@@ -2,6 +2,21 @@
   "$schema": "https://opencode.ai/config.json",
   "model": "opencode-go/glm-5.3-flash",
   "default_agent": "build",
+  "provider": {
+    "fireworks": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Fireworks",
+      "options": {
+        "baseURL": "https://api.fireworks.ai/inference/v1",
+        "apiKey": "{env:FIREWORKS_API_KEY}"
+      },
+      "models": {
+        "accounts/fireworks/models/glm-5p3-flash": {
+          "name": "GLM 5.3 Flash"
+        }
+      }
+    }
+  },
   "agent": {
     "reviewer": {
       "mode": "primary",

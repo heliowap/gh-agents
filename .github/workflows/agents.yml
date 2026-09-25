@@ -1,0 +1,349 @@
+name: gh-agents
+
+# Reusable workflow: automatic PR review, `/oc` fix on comments, CI-failure
+# diagnosis. Called via `uses: heliowap/gh-agents/.github/workflows/agents.yml@v1`
+# with `secrets: inherit`. What this workflow is NOT:
+#   - a merge gate. The reviewer comments; the human decides.
+#   - CI auto-fix. ci-doctor diagnoses; fixing is a human decision or `/oc`.
+#
+# Agents/skills resolution: the caller's checkout is primary (`opencode.json`,
+# `.agents/skills/`); the "seed" step copies this repo's defaults only where
+# the caller has none. Untrusted values reach `run:` via `env:`, never ${{ }}.
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: "Runner label fallback; the caller's vars.AGENT_RUNNER wins."
+        type: string
+        default: "self-hosted"
+      model:
+        description: "OpenCode model for all agents."
+        type: string
+        default: "opencode-go/glm-5.3-flash"
+      use_container:
+        description: "Run jobs in the gh-agents-runtime image. false = host (repos whose tests need Docker; less isolation)."
+        type: boolean
+        default: true
+      runtime_image:
+        description: "Job image when use_container=true."
+        type: string
+        default: "ghcr.io/heliowap/gh-agents-runtime:v1"
+      gh_agents_ref:
+        description: "Ref for the gh-agents defaults checkout (agents/skills/scripts)."
+        type: string
+        default: "v1"
+      ci_workflows:
+        description: "Comma-separated workflow names ci-doctor watches. Empty = all."
+        type: string
+        default: ""
+    secrets:
+      OPENCODE_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+# One run per (event, target): comments get their own group so a comment never
+# cancels an in-flight review (intrador #1417).
+concurrency:
+  group: gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  review:
+    name: Review (${{ inputs.model }})
+    # pull_request only; a draft is not a review request (ready_for_review fires later).
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
+    container: ${{ inputs.use_container && inputs.runtime_image || '' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # the action fetches `origin <branch>` itself; credentials must persist
+          persist-credentials: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: heliowap/gh-agents
+          ref: ${{ inputs.gh_agents_ref }}
+          path: .gh-agents
+          persist-credentials: false
+      - name: Seed opencode.json and fallback skills
+        # caller's own files always win; a repo with nothing still works
+        run: |
+          set -euo pipefail
+          # seeded files must stay invisible to `git status` — the opencode
+          # action commits+pushes a dirty worktree onto the caller's branch
+          exclude=.git/info/exclude
+          echo "/.gh-agents/" >> "$exclude"
+          if [ ! -f opencode.json ]; then
+            cp .gh-agents/agents/opencode.json opencode.json
+            echo "/opencode.json" >> "$exclude"
+          fi
+          for s in .gh-agents/skills/*/; do
+            name="$(basename "$s")"
+            if [ ! -d ".agents/skills/$name" ]; then
+              mkdir -p .agents/skills
+              cp -r "$s" ".agents/skills/$name"
+              echo "/.agents/skills/$name/" >> "$exclude"
+            fi
+          done
+      - name: Preflight OPENCODE_API_KEY
+        # fork PRs and missing secrets arrive as empty — fail with a readable error
+        run: |
+          if [ -z "${OPENCODE_API_KEY:-}" ]; then
+            echo "::error::OPENCODE_API_KEY is empty — set the repo secret (README onboarding step 2) or check fork-PR secret withholding"
+            exit 1
+          fi
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      - id: review
+        uses: anomalyco/opencode/github@3a103fe0aff726a4edc7492f03f7b88195d9e4c9 # v2.0.16
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # the action commits whatever the agent produced; jobs have no git identity
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+        with:
+          model: ${{ inputs.model }}
+          agent: reviewer
+          use_github_token: true
+          share: false
+          # without PROMPT the action defaults to "Review this pull request"
+          # and the contract below (parsed by the next step) is lost
+          prompt: |
+            Review this pull request. Output one review with three sections —
+            `BLOCKING`, `WARNING`, `NIT` — each finding as `path:line` plus why
+            it matters, `(none)` under empty sections, and a final line exactly
+            `SUMMARY: <n> BLOCKING, <n> WARNING, <n> NIT`. Do not edit files.
+      # BLOCKING becomes a `review-blocking` issue; WARNING/NIT do not. One
+      # issue per PR (key `PR #N` in title); a closed one reopens on new
+      # BLOCKING. Only when the action succeeded — a failed review has no SUMMARY.
+      - name: BLOCKING becomes a review-blocking issue
+        if: steps.review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          out="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
+            | jq -s add | python3 .gh-agents/scripts/review_blocking.py --comments)"
+          blocking="$(jq -r .blocking <<<"$out")"
+          if [ "$blocking" = "0" ]; then
+            echo "no BLOCKING on PR #${PR} (or no SUMMARY line — see stderr above)"
+            exit 0
+          fi
+          # shellcheck disable=SC2016 # backticks in the format string are literal markdown
+          body="$(printf 'Automatic review of PR #%s (SHA `%s`) ended with %s BLOCKING.\n\n- Comment: %s\n\n```\nBLOCKING\n%s\n```\n\nTriage: `/oc <request>` here, or close if not pertinent.\n' \
+            "$PR" "$SHA" "$blocking" "$(jq -r .url <<<"$out")" "$(jq -r .block <<<"$out")")"
+          # workflows that use a label guarantee the label
+          gh label create review-blocking --color B60205 \
+            --description "Automatic review reported BLOCKING" --force >/dev/null
+          # client-side filter, not --search: the Search API lags and a
+          # `synchronize` right after creation would open a duplicate
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=all&labels=review-blocking&per_page=100" \
+            | jq -s --arg pr "PR #${PR} " 'add | map(select(.pull_request == null and (.title | contains($pr)))) | .[0] // {}')"
+          number="$(jq -r '.number // empty' <<<"$existing")"
+          if [ -n "$number" ]; then
+            [ "$(jq -r .state <<<"$existing")" = "closed" ] && gh issue reopen "$number"
+            gh issue comment "$number" --body "$body"
+            echo "issue #${number} updated"
+            exit 0
+          fi
+          gh issue create --label review-blocking \
+            --title "review-blocking: PR #${PR} with BLOCKING in review" \
+            --body "$body"
+
+  fix:
+    name: Fix (/oc)
+    # Comments are untrusted input: only OWNER/MEMBER/COLLABORATOR, never a bot
+    # (a bot triggering the fixer would be a bot-triggered bot).
+    if: >-
+      (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
+      && github.event.comment.user.type != 'Bot'
+      && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
+    runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
+    container: ${{ inputs.use_container && inputs.runtime_image || '' }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: heliowap/gh-agents
+          ref: ${{ inputs.gh_agents_ref }}
+          path: .gh-agents
+          persist-credentials: false
+      - name: Seed opencode.json and fallback skills
+        run: |
+          set -euo pipefail
+          # seeded files must stay invisible to `git status` — the opencode
+          # action commits+pushes a dirty worktree onto the caller's branch
+          exclude=.git/info/exclude
+          echo "/.gh-agents/" >> "$exclude"
+          if [ ! -f opencode.json ]; then
+            cp .gh-agents/agents/opencode.json opencode.json
+            echo "/opencode.json" >> "$exclude"
+          fi
+          for s in .gh-agents/skills/*/; do
+            name="$(basename "$s")"
+            if [ ! -d ".agents/skills/$name" ]; then
+              mkdir -p .agents/skills
+              cp -r "$s" ".agents/skills/$name"
+              echo "/.agents/skills/$name/" >> "$exclude"
+            fi
+          done
+      - name: Preflight OPENCODE_API_KEY
+        run: |
+          if [ -z "${OPENCODE_API_KEY:-}" ]; then
+            echo "::error::OPENCODE_API_KEY is empty — set the repo secret (README onboarding step 2)"
+            exit 1
+          fi
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      - uses: anomalyco/opencode/github@3a103fe0aff726a4edc7492f03f7b88195d9e4c9 # v2.0.16
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # the action commits whatever the agent produced; jobs have no git identity
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          GIT_COMMITTER_NAME: "github-actions[bot]"
+          GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+        with:
+          model: ${{ inputs.model }}
+          agent: fixer
+          use_github_token: true
+          share: false
+
+  ci-doctor:
+    name: CI doctor
+    # failed workflow_run; empty ci_workflows watches all (regra: diagnose-only,
+    # never fix — fixing is /oc or human).
+    if: >-
+      github.event_name == 'workflow_run'
+      && github.event.workflow_run.conclusion == 'failure'
+      && (inputs.ci_workflows == '' || contains(inputs.ci_workflows, github.event.workflow_run.name))
+    runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
+    container: ${{ inputs.use_container && inputs.runtime_image || '' }}
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: heliowap/gh-agents
+          ref: ${{ inputs.gh_agents_ref }}
+          path: .gh-agents
+          persist-credentials: false
+      - name: Seed opencode.json and fallback skills
+        run: |
+          set -euo pipefail
+          # seeded files must stay invisible to `git status` — the opencode
+          # action commits+pushes a dirty worktree onto the caller's branch
+          exclude=.git/info/exclude
+          echo "/.gh-agents/" >> "$exclude"
+          if [ ! -f opencode.json ]; then
+            cp .gh-agents/agents/opencode.json opencode.json
+            echo "/opencode.json" >> "$exclude"
+          fi
+          for s in .gh-agents/skills/*/; do
+            name="$(basename "$s")"
+            if [ ! -d ".agents/skills/$name" ]; then
+              mkdir -p .agents/skills
+              cp -r "$s" ".agents/skills/$name"
+              echo "/.agents/skills/$name/" >> "$exclude"
+            fi
+          done
+      - name: Preflight OPENCODE_API_KEY
+        run: |
+          if [ -z "${OPENCODE_API_KEY:-}" ]; then
+            echo "::error::OPENCODE_API_KEY is empty — set the repo secret (README onboarding step 2)"
+            exit 1
+          fi
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      # Dedup is deterministic, not LLM-decided: one diagnosis per (run, sha),
+      # keyed by the <!-- ci-doctor:<sha> --> marker the agent must append.
+      - name: Resolve PR and dedup
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" \
+                --jq '.pull_requests[0].number // empty')"
+          if [ -z "$pr" ]; then
+            echo "run ${RUN_ID} has no associated PR; ci-doctor skips silently"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          dup="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${pr}/comments?per_page=100" \
+            | jq -s --arg m "<!-- ci-doctor:${HEAD_SHA} -->" \
+              'add | map(select(.body | contains($m))) | length')"
+          if [ "$dup" != "0" ]; then
+            echo "diagnosis for ${HEAD_SHA} already posted on PR #${pr}"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          { echo "pr=${pr}"; echo "skip=false"; } >> "$GITHUB_OUTPUT"
+      - name: Ensure opencode CLI
+        # the runtime image already carries it; host mode installs on demand
+        if: steps.gate.outputs.skip == 'false'
+        run: |
+          command -v opencode >/dev/null || {
+            curl -fsSL https://opencode.ai/install | bash
+            echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          }
+      - name: Diagnose failed run
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          MODEL: ${{ inputs.model }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PR: ${{ steps.gate.outputs.pr }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016 # backticks in the format string are literal markdown
+          prompt="$(printf 'Workflow run %s ("%s") failed at SHA %s. Diagnose it: run `gh run view %s --log-failed`, find the root cause, and post ONE comment on PR #%s with `gh pr comment %s --body ...`. Format: probable cause, the log evidence, the suggested fix. End the comment with this exact line: <!-- ci-doctor:%s -->. Do not edit code; diagnosis only.' \
+            "$RUN_URL" "$RUN_NAME" "$HEAD_SHA" "$RUN_ID" "$PR" "$PR" "$HEAD_SHA")"
+          # sed neutralizes workflow commands (`##[error]`, `::error::`) in the
+          # failed run's logs so they don't become annotations on THIS run.
+          # Unanchored: agent output may prepend ANSI escapes, and the runner
+          # strips them before command parsing.
+          opencode run --model "$MODEL" --agent ci-doctor "$prompt" 2>&1 \
+            | sed -e 's/##\[/## [/g' \
+                  -e 's/::\(add-mask\|debug\|error\|warning\|notice\|group\|endgroup\|echo\|stop-commands\)::/:: \1::/g'

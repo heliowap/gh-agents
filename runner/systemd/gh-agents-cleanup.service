@@ -1,0 +1,7 @@
+[Unit]
+Description=Remove _work dirs of gh-agents runners idle >7 days
+
+[Service]
+Type=oneshot
+User=gh-agents
+ExecStart=/home/gh-agents/gh-agents/runner/cleanup.sh

@@ -53,6 +53,12 @@ concurrency:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# Container jobs default run: to `sh` (dash on ubuntu — no pipefail). Bash
+# exists in the runtime image and on hosted runners, so pin it everywhere.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   review:
     name: Review (${{ inputs.model }})

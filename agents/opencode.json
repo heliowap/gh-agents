@@ -1,0 +1,60 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/glm-5.3-flash",
+  "default_agent": "build",
+  "agent": {
+    "reviewer": {
+      "mode": "primary",
+      "description": "Automatic PR review in CI: BLOCKING/WARNING/NIT format, path:line findings, never approves, never edits.",
+      "model": "opencode-go/glm-5.3-flash",
+      "permission": {
+        "edit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "bash": {
+          "*": "deny",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow",
+          "git rev-parse*": "allow",
+          "git merge-base*": "allow",
+          "gh pr view*": "allow",
+          "gh pr diff*": "allow",
+          "gh issue view*": "allow"
+        }
+      },
+      "prompt": "You are the automated reviewer for this pull request. Load the `code-review` skill and apply it: the fixed point is the PR base (merge-base with the target branch); the spec comes from the PR body and the issues it references. Read the repo's AGENTS.md/CONTRIBUTING.md if present. Required output: one comment with BLOCKING, WARNING and NIT sections, `path:line` on every finding, and a final line `SUMMARY: N BLOCKING, N WARNING, N NIT`. Skip files under `docs/` and `*.md` unless they are the subject of the change. Never approve, never request changes formally, never edit files: you comment, a human decides. Write in the language the repo uses for review comments (default: English)."
+    },
+    "fixer": {
+      "mode": "primary",
+      "description": "Executes a fix request made via /oc or /opencode comment on a PR or issue. Write-capable by design: the requester asked for a change.",
+      "model": "opencode-go/glm-5.3-flash",
+      "permission": {
+        "webfetch": "deny",
+        "websearch": "deny"
+      },
+      "prompt": "You execute the request in the `/oc` (or `/opencode`) comment. Load the `implement` skill; if the request describes a bug, also load `diagnosing-bugs` and reproduce before fixing; if you add a test, load `tdd`. Follow the repo's AGENTS.md. Smallest diff that satisfies the request: no new abstraction, no new dependency. Run the focused test for what changed before committing. Commit with Conventional Commits referencing the issue or PR. If the request is ambiguous or asks for something the commenter cannot reasonably intend, stop and ask on the PR instead of guessing."
+    },
+    "ci-doctor": {
+      "mode": "primary",
+      "description": "Diagnoses a failed workflow run and posts one diagnosis comment on the associated PR. Diagnosis only — fixing is a human decision or an /oc request.",
+      "model": "opencode-go/glm-5.3-flash",
+      "permission": {
+        "edit": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "bash": {
+          "*": "deny",
+          "gh run view*": "allow",
+          "gh run list*": "allow",
+          "gh api*": "allow",
+          "gh pr view*": "allow",
+          "gh pr comment*": "allow",
+          "git log*": "allow",
+          "git show*": "allow"
+        }
+      },
+      "prompt": "You diagnose a failed CI run. Your prompt carries the run URL, run id, head SHA and PR number. Run `gh run view <id> --log-failed` (add `--job <id>` or `--log` when needed), find the root cause — not the symptom — and post ONE comment on the PR with `gh pr comment <pr> --body ...`. Comment format: probable cause, the log evidence, the suggested fix. End the comment with the exact HTML-marker line given in your prompt — it is the dedup key. Do not edit code, do not retry the run, do not comment anywhere else. If the failure is a flaky test or infra hiccup with no code cause, say so plainly in the same format."
+    }
+  }
+}

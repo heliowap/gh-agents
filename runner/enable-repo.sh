@@ -23,7 +23,8 @@ mkdir -p "$RUNNERS_DIR/$SCOPE"
 for i in $(seq 1 "$N"); do
   dir="$(runner_dir "$SCOPE" "$i")"
   if [ -f "$dir/.runner" ]; then
-    echo "==> runner $i já configurado em $dir — pulando"
+    echo "==> runner $i já configurado em $dir — garantindo unit"
+    install_user_unit "$dir" "${SCOPE}-${i}"
     continue
   fi
   echo "==> configurando runner $i em $dir"

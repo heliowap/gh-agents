@@ -83,9 +83,28 @@ EOF
   [ "$(scope_org intrador)" = "org--intrador" ]
 }
 
+@test "enable-repo refuses when a legacy system unit holds the runner" {
+  scope="owner--repo"; d="$GH_AGENTS_HOME/runners/$scope/1"
+  mkdir -p "$d/bin"; touch "$d/.runner" "$d/bin/runsvc.sh"
+  echo "actions.runner.owner-repo.owner--repo-1.service" > "$d/.service"
+  cat > "$STUB/systemctl" <<'EOF'
+#!/usr/bin/env bash
+# system bus still knows the legacy unit; user bus stays empty
+case "$*" in *--user*) exit 0 ;; *) echo "actions.runner.owner-repo.owner--repo-1.service loaded active running"; exit 0 ;; esac
+EOF
+  chmod +x "$STUB/systemctl"
+  run "$REPO_ROOT/runner/enable-repo.sh" owner/repo 1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"legada"* || "$output" == *"legacy"* ]]
+  [[ "$output" == *"svc.sh"* ]]
+}
+
 @test "enable-repo is idempotent on a configured runner" {
-  scope="owner--repo"; mkdir -p "$GH_AGENTS_HOME/runners/$scope/1" "$GH_AGENTS_HOME/runners/$scope/2"
-  touch "$GH_AGENTS_HOME/runners/$scope/1/.runner" "$GH_AGENTS_HOME/runners/$scope/2/.runner"
+  scope="owner--repo"
+  for n in 1 2; do
+    mkdir -p "$GH_AGENTS_HOME/runners/$scope/$n/bin"
+    touch "$GH_AGENTS_HOME/runners/$scope/$n/.runner" "$GH_AGENTS_HOME/runners/$scope/$n/bin/runsvc.sh"
+  done
   run "$REPO_ROOT/runner/enable-repo.sh" owner/repo 2
   [ "$status" -eq 0 ]
   [[ "$output" == *"já configurado"* || "$output" == *"already"* ]]

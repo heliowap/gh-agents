@@ -50,8 +50,25 @@ ensure_private_runner_group() {
 # Nome = actions.runner.<runner-name>.service — unit_for consulta, nunca inventa.
 unit_name() { echo "actions.runner.$1.service"; }   # $1 = runner name (<escopo>-<n>)
 
+# A runner dir with .service was installed by the old `sudo ./svc.sh` flow —
+# a *system* unit. Starting a user unit on the same runner makes two processes
+# fight over one GitHub session. Refuse; migrating the legacy unit needs root.
+assert_no_legacy_system_unit() {                   # <dir>
+  local dir="$1" svc
+  [ -f "$dir/.service" ] || return 0
+  svc="$(cat "$dir/.service")"
+  if systemctl cat "$svc" >/dev/null 2>&1 || systemctl is-active --quiet "$svc" 2>/dev/null; then
+    die "unit de sistema legada '$svc' ainda segura $dir — migre antes: (cd $dir && sudo ./svc.sh stop && sudo ./svc.sh uninstall)"
+  fi
+  rm -f "$dir/.service"   # unit já desinstalada; marcador é resíduo
+}
+
 install_user_unit() {                              # <dir> <runner-name>
   local dir="$1" name; name="$(unit_name "$2")"
+  assert_no_legacy_system_unit "$dir"
+  # svc.sh's only privileged step is copying runsvc.sh to the runner root —
+  # as the owning user we just copy it ourselves.
+  [ -f "$dir/runsvc.sh" ] || install -m 0755 "$dir/bin/runsvc.sh" "$dir/runsvc.sh"
   mkdir -p "$UNIT_DIR"
   cat > "$UNIT_DIR/$name" <<EOF
 [Unit]

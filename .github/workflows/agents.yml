@@ -81,12 +81,20 @@ jobs:
         # caller's own files always win; a repo with nothing still works
         run: |
           set -euo pipefail
-          [ -f opencode.json ] || cp .gh-agents/agents/opencode.json opencode.json
+          # seeded files must stay invisible to `git status` — the opencode
+          # action commits+pushes a dirty worktree onto the caller's branch
+          exclude=.git/info/exclude
+          echo "/.gh-agents/" >> "$exclude"
+          if [ ! -f opencode.json ]; then
+            cp .gh-agents/agents/opencode.json opencode.json
+            echo "/opencode.json" >> "$exclude"
+          fi
           for s in .gh-agents/skills/*/; do
             name="$(basename "$s")"
             if [ ! -d ".agents/skills/$name" ]; then
               mkdir -p .agents/skills
               cp -r "$s" ".agents/skills/$name"
+              echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
       - name: Preflight OPENCODE_API_KEY
@@ -182,12 +190,20 @@ jobs:
       - name: Seed opencode.json and fallback skills
         run: |
           set -euo pipefail
-          [ -f opencode.json ] || cp .gh-agents/agents/opencode.json opencode.json
+          # seeded files must stay invisible to `git status` — the opencode
+          # action commits+pushes a dirty worktree onto the caller's branch
+          exclude=.git/info/exclude
+          echo "/.gh-agents/" >> "$exclude"
+          if [ ! -f opencode.json ]; then
+            cp .gh-agents/agents/opencode.json opencode.json
+            echo "/opencode.json" >> "$exclude"
+          fi
           for s in .gh-agents/skills/*/; do
             name="$(basename "$s")"
             if [ ! -d ".agents/skills/$name" ]; then
               mkdir -p .agents/skills
               cp -r "$s" ".agents/skills/$name"
+              echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
       - name: Preflight OPENCODE_API_KEY
@@ -243,12 +259,20 @@ jobs:
       - name: Seed opencode.json and fallback skills
         run: |
           set -euo pipefail
-          [ -f opencode.json ] || cp .gh-agents/agents/opencode.json opencode.json
+          # seeded files must stay invisible to `git status` — the opencode
+          # action commits+pushes a dirty worktree onto the caller's branch
+          exclude=.git/info/exclude
+          echo "/.gh-agents/" >> "$exclude"
+          if [ ! -f opencode.json ]; then
+            cp .gh-agents/agents/opencode.json opencode.json
+            echo "/opencode.json" >> "$exclude"
+          fi
           for s in .gh-agents/skills/*/; do
             name="$(basename "$s")"
             if [ ! -d ".agents/skills/$name" ]; then
               mkdir -p .agents/skills
               cp -r "$s" ".agents/skills/$name"
+              echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
       - name: Preflight OPENCODE_API_KEY

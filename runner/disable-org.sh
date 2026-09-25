@@ -20,13 +20,14 @@ for dir in "$BASE"/*/; do
   echo "==> removendo runner em $dir"
   (
     cd "$dir"
-    if [ -f ./svc.sh ]; then
-      sudo ./svc.sh stop || true
-      sudo ./svc.sh uninstall || true
-    fi
+    # ordem do fleet.md: desregistro → units → diretório
     if [ -f ./.runner ]; then
       token="$(org_removal_token "$ORG")"
       ./config.sh remove --token "$token"
+    fi
+    if [ -f ./svc.sh ]; then
+      sudo ./svc.sh stop || true
+      sudo ./svc.sh uninstall || true
     fi
   )
   rm -rf "$dir"

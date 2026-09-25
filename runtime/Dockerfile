@@ -22,8 +22,10 @@ ARG NODE_VERSION=22.23.3
 RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
     | tar -xJ -C /usr/local --strip-components=1
 
-# opencode CLI — installer drops in $HOME/.opencode/bin; expose on PATH
-RUN curl -fsSL https://opencode.ai/install | bash \
+# opencode CLI — pinned: a floating latest makes the image non-reproducible.
+# Bump deliberately alongside runtime/VERSION.
+ARG OPENCODE_VERSION=1.18.32
+RUN curl -fsSL https://opencode.ai/install | bash -s -- --version "$OPENCODE_VERSION" \
  && ln -s "$HOME/.opencode/bin/opencode" /usr/local/bin/opencode
 
 CMD ["bash"]

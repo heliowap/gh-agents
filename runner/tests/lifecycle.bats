@@ -43,6 +43,10 @@ teardown() { rm -rf "$TEST_HOME"; }
   [ "$status" -eq 0 ]
   grep -q "config.sh remove" "$CALLS"
   [ ! -d "$GH_AGENTS_HOME/runners/own--rep/1" ]
+  # fleet.md order: registration removal, then units, then dirs
+  first_cfg="$(grep -n 'config.sh remove' "$CALLS" | head -1 | cut -d: -f1)"
+  first_svc="$(grep -n 'svc.sh' "$CALLS" | head -1 | cut -d: -f1)"
+  [ -n "$first_cfg" ] && [ -n "$first_svc" ] && [ "$first_cfg" -lt "$first_svc" ]
 }
 
 @test "disable-repo on unknown scope exits cleanly" {

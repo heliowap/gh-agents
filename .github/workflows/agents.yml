@@ -53,6 +53,12 @@ concurrency:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+# Container jobs default run: to `sh` (dash on ubuntu — no pipefail). Bash
+# exists in the runtime image and on hosted runners, so pin it everywhere.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   review:
     name: Review (${{ inputs.model }})
@@ -77,6 +83,11 @@ jobs:
           ref: ${{ inputs.gh_agents_ref }}
           path: .gh-agents
           persist-credentials: false
+      # In container jobs the workspace is owned by the host runner uid while
+      # the image runs as root — git refuses foreign-owned repos, and opencode
+      # then resolves a non-repo project root. Host jobs are unaffected.
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Seed opencode.json and fallback skills
         # caller's own files always win; a repo with nothing still works
         run: |
@@ -194,6 +205,9 @@ jobs:
           ref: ${{ inputs.gh_agents_ref }}
           path: .gh-agents
           persist-credentials: false
+      # see review job — containers need the workspace marked safe for git
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Seed opencode.json and fallback skills
         run: |
           set -euo pipefail
@@ -263,6 +277,9 @@ jobs:
           ref: ${{ inputs.gh_agents_ref }}
           path: .gh-agents
           persist-credentials: false
+      # see review job — containers need the workspace marked safe for git
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Seed opencode.json and fallback skills
         run: |
           set -euo pipefail

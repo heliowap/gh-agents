@@ -1632,6 +1632,15 @@ These are **not** executed by the implementing agent; they're the human's runboo
 git checkout main && git pull
 git tag -a v1 -m "v1: review, /oc fix, ci-doctor" && git push origin v1
 # build-runtime.yml pushes ghcr.io/heliowap/gh-agents-runtime:v1 on merge
+
+# The new ghcr package is PRIVATE by default and callers pull it with no
+# credentials — make it public once, or every container job fails to pull:
+#   Repo → Packages → gh-agents-runtime → Package settings → Change visibility → public
+# (or: gh api -X PATCH /user/packages/container/gh-agents-runtime -f visibility=public)
+
+# Then re-verify the container path on the scratch repo: flip the caller's
+# `use_container` to true (or drop it — true is the default) and open a PR.
+# Pre-merge e2e ran with use_container: false because the image didn't exist.
 ```
 
 - [ ] **Step 2: Provision the fleet user on intrador-tech-vps**

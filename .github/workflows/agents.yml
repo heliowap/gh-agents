@@ -121,6 +121,13 @@ jobs:
           agent: reviewer
           use_github_token: true
           share: false
+          # without PROMPT the action defaults to "Review this pull request"
+          # and the contract below (parsed by the next step) is lost
+          prompt: |
+            Review this pull request. Output one review with three sections —
+            `BLOCKING`, `WARNING`, `NIT` — each finding as `path:line` plus why
+            it matters, `(none)` under empty sections, and a final line exactly
+            `SUMMARY: <n> BLOCKING, <n> WARNING, <n> NIT`. Do not edit files.
       # BLOCKING becomes a `review-blocking` issue; WARNING/NIT do not. One
       # issue per PR (key `PR #N` in title); a closed one reopens on new
       # BLOCKING. Only when the action succeeded — a failed review has no SUMMARY.

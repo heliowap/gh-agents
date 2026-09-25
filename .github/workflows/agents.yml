@@ -340,4 +340,7 @@ jobs:
           # shellcheck disable=SC2016 # backticks in the format string are literal markdown
           prompt="$(printf 'Workflow run %s ("%s") failed at SHA %s. Diagnose it: run `gh run view %s --log-failed`, find the root cause, and post ONE comment on PR #%s with `gh pr comment %s --body ...`. Format: probable cause, the log evidence, the suggested fix. End the comment with this exact line: <!-- ci-doctor:%s -->. Do not edit code; diagnosis only.' \
             "$RUN_URL" "$RUN_NAME" "$HEAD_SHA" "$RUN_ID" "$PR" "$PR" "$HEAD_SHA")"
-          opencode run --model "$MODEL" --agent ci-doctor "$prompt"
+          # sed neutralizes workflow commands (`##[error]`, `::error::`) in the
+          # failed run's logs so they don't become annotations on THIS run.
+          opencode run --model "$MODEL" --agent ci-doctor "$prompt" 2>&1 \
+            | sed -e 's/^##\[/## [/' -e 's/^::/:: /'

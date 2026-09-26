@@ -16,8 +16,10 @@ on:
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    # exact workflow names — this filter takes no globs ('*' never matches);
-    # keep it in sync with ci_workflows and leave this workflow's own name out
+    # exact workflow names, kept in sync with ci_workflows — '*' behaves as
+    # match-all (wakes this workflow on every completed run; the callee's
+    # `if` then skips all jobs). Listing only the CI workflows keeps
+    # unrelated completions from paying a run.
     workflows: ['ci']
     types: [completed]
 

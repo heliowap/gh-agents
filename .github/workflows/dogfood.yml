@@ -19,9 +19,11 @@ on:
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    # exact workflow names — this filter takes no globs ('*' never matches);
-    # keep it in sync with ci_workflows and leave `agents` itself out so a
-    # finished run can't retrigger itself
+    # name the CI workflows and keep it in sync with ci_workflows — '*' is
+    # not the dead filter it looks like: on main it behaved as match-all and
+    # woke this workflow on every `lint` completion (the callee's `if` then
+    # skipped every job). GitHub suppresses a workflow retriggering itself,
+    # so `agents` completing never fired this again.
     workflows: ['lint', 'build-runtime']
     types: [completed]
 

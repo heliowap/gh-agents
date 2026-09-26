@@ -60,7 +60,7 @@ Isolamento (contrato com gh-agents): usuários separados —
 - **Fleet gh-agents**: cards por runner (idle/busy/offline, job atual,
   unit systemd), fila de jobs `queued`, restart/drenar unit.
 - **Switch de runner**: dropdown por repo (`self-hosted`, `ubuntu-latest`,
-  `depot-*`, `ubicloud-*`) → `PUT /actions/variables/{CI_RUNNER,AGENT_RUNNER}`;
+  `depot-*`, `ubicloud-*`) → `PATCH /actions/variables/{CI_RUNNER,AGENT_RUNNER}`;
   bulk apply; presets nomeados (economia/rapidez/fallback); badge
   "switchable" só onde o padrão `vars.X || default` existe; para os demais,
   botão "adotar switch" que despacha `/oc` no repo.
@@ -85,7 +85,7 @@ Isolamento (contrato com gh-agents): usuários separados —
 3. O repo do dashboard é o segundo habilitado no gh-agents (dogfood).
 4. Credencial: GitHub App `gh-agents-ops` (manifest gerado pelo repo
    gh-agents), instalado em heliowap + orgs — permissions: `actions:write`,
-   `administration` (runners/variables), `metadata`.
+   `administration` (runners), `variables` (o switch), `metadata`.
 
 ## Pendências para o spec completo (fase B)
 

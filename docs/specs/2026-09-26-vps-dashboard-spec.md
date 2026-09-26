@@ -22,13 +22,20 @@ escopo excessivo e prende a operação a uma conta pessoal.
 - **Nome**: `gh-agents-ops` (slug gerado: `gh-agents-ops`; se ocupado,
   `vpsdash-ops`).
 - **Repository permissions**:
-  - `actions`: read/write — listar runs, re-run, ler variáveis de repo.
-  - `administration`: read/write — listar/remover self-hosted runners,
-    `PUT /actions/variables/{CI_RUNNER,AGENT_RUNNER}` (o switch do painel).
+  - `actions`: read/write — listar runs, re-run.
+  - `administration`: read/write — listar/remover self-hosted runners.
+  - `variables`: read/write — `PATCH
+    /repos/{owner}/{repo}/actions/variables/{CI_RUNNER,AGENT_RUNNER}` (o
+    switch do painel). Permissão própria — `administration` **não** cobre
+    `actions/variables`. Chave no manifesto: `actions_variables`; docs
+    recentes exibem como "Agent variables" (`agent_variables`), renomeação
+    em curso — se uma for recusada, usar a outra.
   - `metadata`: read (implícita).
-- **Organization permissions**: `self-hosted runners`: read/write;
-  `actions variables`: read/write — para `enable-org` futuro e switch em
-  repos de org (`intrador`, `All-Medical`).
+- **Organization permissions**: `self-hosted runners`: read/write —
+  `enable-org` futuro; `organization_agent_variables`: read/write —
+  variáveis de org, se o painel precisar. O switch em repo de org usa a
+  permissão `variables` de repo, via instalação na org (`intrador`,
+  `All-Medical`).
 - **Sem** `contents`, sem `issues` — o painel não lê código nem posta.
 - **Instalação**: conta `heliowap` (todos os repos) + org `intrador` +
   org `All-Medical` — instalação por org só quando #7 (enable orgs) sair

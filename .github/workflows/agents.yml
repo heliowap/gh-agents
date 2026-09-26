@@ -219,6 +219,10 @@ jobs:
           GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
           GIT_COMMITTER_NAME: "github-actions[bot]"
           GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          # the CLI ignores `agent:` below (#25); inline config wins over the
+          # caller's opencode.json. Global edit deny also covers the `general`
+          # subagents the reviewer spawns, which don't inherit its permissions.
+          OPENCODE_CONFIG_CONTENT: '{"default_agent":"reviewer","permission":{"edit":"deny"}}'
         with:
           model: ${{ steps.model.outputs.model }}
           agent: reviewer
@@ -231,6 +235,32 @@ jobs:
             `BLOCKING`, `WARNING`, `NIT` — each finding as `path:line` plus why
             it matters, `(none)` under empty sections, and a final line exactly
             `SUMMARY: <n> BLOCKING, <n> WARNING, <n> NIT`. Do not edit files.
+      # `opencode github run` ignores the `agent:` input and falls back to
+      # `default_agent`, then `build` — no sandbox (#25). OPENCODE_CONFIG_CONTENT
+      # pins it; this proves from the session itself that the pin held, since the
+      # action installs the latest CLI on every run. Root session only: subagents
+      # (`general`) run in child sessions created later.
+      - id: agent-check
+        if: steps.review.outcome == 'success' || steps.review.outcome == 'failure'
+        env:
+          STARTED: ${{ steps.started.outputs.ts }}
+          AGENT: reviewer
+        run: |
+          set -uo pipefail
+          # shellcheck disable=SC2016  # $d/$t are jq variables
+          sid="$(opencode session list -n 50 --format json 2>/dev/null | jq -r --arg d "$PWD" --argjson t "$STARTED" '[.[] | select(.directory == $d and .created >= ($t * 1000) and (.parentID // null) == null)] | sort_by(.created) | .[0].id // empty')" || true
+          if [ -z "$sid" ]; then
+            echo "::warning title=Agent not verified::no opencode session from this run found; cannot prove the job ran as $AGENT"
+            exit 0
+          fi
+          rc=0
+          out="$(opencode export "$sid" 2>/dev/null | python3 .gh-agents/scripts/session_agent.py --expect "$AGENT")" || rc=$?
+          echo "$out"
+          case "$rc" in
+            0) ;;
+            2) echo "::warning title=Agent not verified::$out" ;;
+            *) echo "::error title=Agent not pinned::$out — the $AGENT sandbox did not apply (heliowap/gh-agents#25)"; exit 1 ;;
+          esac
       # Cost attribution on the review comment itself: the action posts as
       # github-actions[bot] and writes the session under $HOME; we read the
       # newest session's usage and append a footer. Best-effort — a failure
@@ -436,7 +466,10 @@ jobs:
           done
           echo "::error::no candidate model responded — check provider keys and balances"
           exit 1
-      - uses: anomalyco/opencode/github@3a103fe0aff726a4edc7492f03f7b88195d9e4c9 # v2.0.16
+      - id: started
+        run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - id: fix
+        uses: anomalyco/opencode/github@3a103fe0aff726a4edc7492f03f7b88195d9e4c9 # v2.0.16
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
@@ -446,11 +479,40 @@ jobs:
           GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
           GIT_COMMITTER_NAME: "github-actions[bot]"
           GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+          # the CLI ignores `agent:` below (#25); inline config wins over the
+          # caller's opencode.json
+          OPENCODE_CONFIG_CONTENT: '{"default_agent":"fixer"}'
         with:
           model: ${{ steps.model.outputs.model }}
           agent: fixer
           use_github_token: true
           share: false
+      # `opencode github run` ignores the `agent:` input and falls back to
+      # `default_agent`, then `build` — no sandbox (#25). OPENCODE_CONFIG_CONTENT
+      # pins it; this proves from the session itself that the pin held, since the
+      # action installs the latest CLI on every run. Root session only: subagents
+      # (`general`) run in child sessions created later.
+      - id: agent-check
+        if: steps.fix.outcome == 'success' || steps.fix.outcome == 'failure'
+        env:
+          STARTED: ${{ steps.started.outputs.ts }}
+          AGENT: fixer
+        run: |
+          set -uo pipefail
+          # shellcheck disable=SC2016  # $d/$t are jq variables
+          sid="$(opencode session list -n 50 --format json 2>/dev/null | jq -r --arg d "$PWD" --argjson t "$STARTED" '[.[] | select(.directory == $d and .created >= ($t * 1000) and (.parentID // null) == null)] | sort_by(.created) | .[0].id // empty')" || true
+          if [ -z "$sid" ]; then
+            echo "::warning title=Agent not verified::no opencode session from this run found; cannot prove the job ran as $AGENT"
+            exit 0
+          fi
+          rc=0
+          out="$(opencode export "$sid" 2>/dev/null | python3 .gh-agents/scripts/session_agent.py --expect "$AGENT")" || rc=$?
+          echo "$out"
+          case "$rc" in
+            0) ;;
+            2) echo "::warning title=Agent not verified::$out" ;;
+            *) echo "::error title=Agent not pinned::$out — the $AGENT sandbox did not apply (heliowap/gh-agents#25)"; exit 1 ;;
+          esac
 
   ci-doctor:
     name: CI doctor

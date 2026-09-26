@@ -54,14 +54,11 @@ on:
 permissions:
   contents: read
 
-# One run per target: the group keys on the PR/issue number only — including
-# event_name would put a `/oc` comment in a different group and let it race
-# the in-flight review it followed (intrador #1417). cancel-in-progress:
-# false queues the newer run; a queued run is still replaced by newer
-# arrivals. Inert inside caller runs — callers must key their own group.
+# One run per (event, target): comments get their own group so a comment never
+# cancels an in-flight review (intrador #1417).
 concurrency:
-  group: gh-agents-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.ref }}
-  cancel-in-progress: false
+  group: gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.ref }}
+  cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

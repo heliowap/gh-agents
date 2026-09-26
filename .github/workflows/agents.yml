@@ -228,7 +228,7 @@ jobs:
               i=m.get("info",{})
               if not isinstance(i,dict): continue
               t=i.get("tokens")
-              if not t: continue
+              if not isinstance(t,dict): continue
               tok+=t.get("total",0); cost+=i.get("cost",0.0) or 0.0
               prov=i.get("providerID") or prov; model=i.get("modelID") or model
           if prov and model:

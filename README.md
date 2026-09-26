@@ -30,7 +30,15 @@ required beyond a secret.
 
 ## Inputs
 
-All inputs are optional; `secrets: inherit` plus the provider key is enough.
+All inputs are optional; the provider key is enough. `secrets: inherit` passes
+it only when the caller has the same owner as this repo (`heliowap`); a repo in
+another org or account maps it explicitly, or the key arrives empty:
+
+```yaml
+    secrets:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+```
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -96,7 +104,7 @@ win; a repo with neither gets this repo's defaults copied in at run time.
 
 - This repo is public so cross-owner callers can use it; it contains no
   secrets and no private topology. Provider keys arrive at run time via
-  `secrets: inherit` — nothing is stored or echoed.
+  `secrets: inherit` or explicit mapping — nothing is stored or echoed.
 - External actions are pinned by full commit SHA; callers pin this workflow by
   tag (`@v1`). `main` is protected.
 - Self-hosted runners serve private repos only: `enable-*.sh` checks

@@ -54,6 +54,16 @@ jobs:
     secrets: inherit
 ```
 
+   `secrets: inherit` only reaches a reusable workflow of the same owner. A
+   repo outside `heliowap` (e.g. an org repo) maps each key explicitly, or the
+   preflight fails with an empty key:
+
+```yaml
+    secrets:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+```
+
 4. Optional per-repo config:
    - `gh variable set AGENT_RUNNER --repo owner/repo -b ubuntu-latest` —
      overrides the central `inputs.runs-on` default (`'self-hosted'`). Set

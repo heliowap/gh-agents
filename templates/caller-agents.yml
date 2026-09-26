@@ -30,6 +30,12 @@ permissions:
 jobs:
   agents:
     uses: heliowap/gh-agents/.github/workflows/agents.yml@v1
+    # `inherit` only passes secrets to a reusable workflow of the same owner
+    # (org or enterprise). Repos outside `heliowap` map them explicitly — with
+    # `inherit` the key arrives empty and the preflight fails:
+    #   secrets:
+    #     OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+    #     FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
     secrets: inherit
     # with:
     #   runs-on: self-hosted        # default; vars.AGENT_RUNNER overrides per repo

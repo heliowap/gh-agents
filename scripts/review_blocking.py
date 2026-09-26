@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Read the reviewer's comment (stdin) and emit JSON: BLOCKING count and block.
 
 Usage: python3 scripts/review_blocking.py < comment.md
@@ -8,6 +7,8 @@ Output: {"blocking": N, "block": "<BLOCKING block text or empty>"}
 
 The count comes from the `SUMMARY: N BLOCKING, ...` line — the reviewer writes
 `BLOCKING\n  (none)` when it is zero, so the block cannot serve as the count.
+The parser also accepts Markdown around the label and the review labels seen
+in Portuguese (`RESUMO`/`SUMÁRIO`, `BLOQUEIO`, `AVISO`).
 No SUMMARY (off-format review) -> 0 plus a stderr warning; exit is always 0,
 the open-issue decision belongs to the YAML (.github/workflows/agents.yml).
 With --comments, `summary: missing` tells the YAML the count is unknown,
@@ -27,7 +28,32 @@ import re
 import sys
 from datetime import datetime
 
-_SUMMARY = re.compile(r"^SUMMARY:\s*(\d+)\s+BLOCKING", re.MULTILINE)
+_SUMMARY_WORD = r"(?:SUMMARY|SUMÁRIO|RESUMO)"
+_BLOCKING_WORD = r"(?:BLOCKING|BLOQUEIOS?)"
+_WARNING_WORD = r"(?:WARNING|AVISOS?)"
+_NIT_WORD = r"(?:NIT|PEQUEN[OA]S?(?:[ \t]+OBSERVAÇÕES)?)"
+# Markdown around the label does not change the count or the block boundary.
+_SUMMARY_PREFIX = rf"^[ \t]*(?:#+[ \t]*)?[*`]*{_SUMMARY_WORD}"
+_SUMMARY = re.compile(
+    _SUMMARY_PREFIX + rf"[*`]*[ \t]*:[*`]*[ \t]*(\d+)[ \t]+{_BLOCKING_WORD}",
+    re.MULTILINE,
+)
+
+
+def _heading(word: str) -> str:
+    """Match a section heading, but not prose starting with its label."""
+    marked = rf"(?:#+[ \t]*\**|\*\*){word}\**(?:[ \t]*:[ \t]*\d+)?\**(?=[ \t]*(?:[(:]|$)).*$"
+    return rf"^[ \t]*(?:{marked}|{word}[ \t]*:?[ \t]*$)"
+
+
+_BLOCK_START = re.compile(_heading(_BLOCKING_WORD), re.MULTILINE)
+_BLOCK_END = re.compile(
+    _heading(rf"(?:{_WARNING_WORD}|{_NIT_WORD})")
+    + "|"
+    + _SUMMARY_PREFIX
+    + r"[*`]*[ \t]*(?::|$)|^[ \t]*---[ \t]*$",
+    re.MULTILINE,
+)
 _BOT_LOGIN = "github-actions[bot]"
 
 
@@ -35,6 +61,16 @@ def blocking_count(text: str) -> int | None:
     """N from the SUMMARY line; None when the comment has no such line."""
     match = _SUMMARY.search(text)
     return int(match.group(1)) if match else None
+
+
+def blocking_block(text: str) -> str:
+    """Text of the final BLOCKING section, ending at the next review section."""
+    starts = list(_BLOCK_START.finditer(text))
+    if not starts:
+        return ""
+    rest = text[starts[-1].end():]
+    end = _BLOCK_END.search(rest)
+    return (rest[: end.start()] if end else rest).strip("\n")
 
 
 def latest_review(comments: list[dict], since: datetime | None = None) -> dict | None:
@@ -62,9 +98,7 @@ if __name__ == "__main__":
     if blocking is None:
         print("review_blocking: SUMMARY line absent; treating as 0 BLOCKING", file=sys.stderr)
         blocking = 0
-    block = re.search(r"^BLOCKING\n(.*?)(?=^(?:WARNING|NIT|SUMMARY)\b|\Z)",
-                      text, re.MULTILINE | re.DOTALL)
-    out = {"blocking": blocking, "block": block.group(1).strip("\n") if block and blocking else ""}
+    out = {"blocking": blocking, "block": blocking_block(text) if blocking else ""}
     if args.comments:
         out["url"] = (review or {}).get("html_url", "")
         out["summary"] = "ok" if review else "missing"

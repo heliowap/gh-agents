@@ -222,7 +222,9 @@ jobs:
               sys.exit(0)
           tok=0; cost=0.0; prov=model=None
           for m in msgs:
+              if not isinstance(m,dict): continue
               i=m.get("info",{})
+              if not isinstance(i,dict): continue
               t=i.get("tokens")
               if not t: continue
               tok+=t.get("total",0); cost+=i.get("cost",0.0) or 0.0
@@ -237,9 +239,12 @@ jobs:
           # O endpoint ignora sort/direction — vem em ordem crescente; `last`
           # + corte `created_at >= SINCE` pegam o comentário desta rodada e
           # nunca um de run anterior (que já estaria anotado).
+          # gh api não tem --arg (é flag do jq) — filtro via pipe. --paginate:
+          # o endpoint ordena ascendente e o comentário desta rodada é o mais
+          # novo; sem paginação ele ficaria fora da página 1 em PR com >100.
           # shellcheck disable=SC2016  # $since é variável jq (--arg), não shell
-          cid="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
-            --jq --arg since "$SINCE" '[.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")) and (.created_at >= $since))] | last | .id // empty')" || true
+          cid="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
+            | jq -sr --arg since "$SINCE" 'add | [.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")) and (.created_at >= $since))] | last | .id // empty')" || true
           [ -n "$cid" ] || { echo "no review comment found to annotate"; exit 0; }
           IFS='|' read -r model tok cost <<<"$meta"
           mins=$(( dur / 60 )); secs=$(( dur % 60 ))

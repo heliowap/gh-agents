@@ -69,10 +69,46 @@ defaults:
     shell: bash
 
 jobs:
-  review:
-    name: Review (${{ inputs.model }})
+  # Who may start a review. The opencode action refuses an actor without write
+  # (`assertPermissions`) and exits 1 before reviewing: a PR pushed by a bot
+  # without write (devin-ai-integration[bot], cursor[bot]) meant a red check
+  # and no review. The gate skips those with a notice — no bot triggers a bot.
+  # Only a permission read as `read`/`none` skips; a failed lookup fails open
+  # (intrador ADR-171, delta 2026-09-22).
+  gate:
+    name: Review gate
     # pull_request only; a draft is not a review request (ready_for_review fires later).
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
+    container: ${{ inputs.use_container && inputs.runtime_image || '' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      reviewable: ${{ steps.actor.outputs.reviewable }}
+    steps:
+      - id: actor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+          if ! perm="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${ACTOR}/permission" --jq .permission)"; then
+            perm=unknown
+          fi
+          echo "permission=${perm}"
+          if [ "$perm" = "read" ] || [ "$perm" = "none" ]; then
+            echo "reviewable=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Review skipped::${ACTOR} has permission=${perm}; the review needs an actor with write. A maintainer can re-run this workflow to review the PR."
+          else
+            echo "reviewable=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  review:
+    name: Review (${{ inputs.model }})
+    needs: gate
+    # the gate decided: draft, non-PR events and actors without write never get here
+    if: needs.gate.outputs.reviewable == 'true'
     runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
     container: ${{ inputs.use_container && inputs.runtime_image || '' }}
     timeout-minutes: 20
@@ -260,19 +296,29 @@ jobs:
       # BLOCKING becomes a `review-blocking` issue; WARNING/NIT do not. One
       # issue per PR (key `PR #N` in title); a closed one reopens on new
       # BLOCKING. Only when the action succeeded — a failed review has no SUMMARY.
-      - name: BLOCKING becomes a review-blocking issue
+      - id: blocking
+        name: BLOCKING becomes a review-blocking issue
         if: steps.review.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
+          SINCE: ${{ steps.started.outputs.at }}
         run: |
           set -euo pipefail
+          # --since: only this run's review counts. Without the cutoff an
+          # off-format review fell back to the previous SHA's one and its count
+          # was reported against the new SHA (intrador #1415).
           out="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
-            | jq -s add | python3 .gh-agents/scripts/review_blocking.py --comments)"
+            | jq -s add | python3 .gh-agents/scripts/review_blocking.py --comments --since "$SINCE")"
+          if [ "$(jq -r .summary <<<"$out")" != "ok" ]; then
+            # not a gate: a warning for the human to read the review, never a red check
+            echo "::warning title=Review off-format::no 'SUMMARY: N BLOCKING, N WARNING, N NIT' line in this run's review of PR #${PR}; BLOCKING count unknown — read the review comment"
+            exit 0
+          fi
           blocking="$(jq -r .blocking <<<"$out")"
           if [ "$blocking" = "0" ]; then
-            echo "no BLOCKING on PR #${PR} (or no SUMMARY line — see stderr above)"
+            echo "no BLOCKING on PR #${PR}"
             exit 0
           fi
           # shellcheck disable=SC2016 # backticks in the format string are literal markdown

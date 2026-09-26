@@ -77,7 +77,12 @@ A label with no matching runner leaves the job queued forever — check
   posts one comment with BLOCKING/WARNING/NIT sections, `path:line` on every
   finding, ending in `SUMMARY: N BLOCKING, N WARNING, N NIT`. When BLOCKING >
   0, a `review-blocking` issue is opened (one per PR; a closed one reopens).
-  The reviewer is read-only and never approves — it comments, a human decides.
+  Only this run's review counts; with no `SUMMARY` line the step leaves a
+  warning instead of guessing zero. The reviewer is read-only and never
+  approves — it comments, a human decides. A `Review gate` job skips the
+  review, with a notice, when the actor that triggered it has only `read` or
+  no permission on the repo (typically a bot pushing to the PR); re-running
+  the workflow as a maintainer reviews it.
 - **fix** — on comments containing `/oc` or `/opencode`, only from
   OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
   coarse pre-filter (`/ocaml` can queue a wasted run, never a wrong edit); the

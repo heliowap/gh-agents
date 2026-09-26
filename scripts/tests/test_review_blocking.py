@@ -55,3 +55,30 @@ def test_cli_missing_summary_exits_zero_with_warning():
     assert out.returncode == 0
     assert json.loads(out.stdout)["blocking"] == 0
     assert "SUMMARY" in out.stderr
+
+
+def _cli(comments, *args):
+    out = subprocess.run([sys.executable, str(SCRIPT), "--comments", *args],
+                         input=json.dumps(comments), capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+def test_cli_since_ignores_valid_review_from_before_the_run():
+    # intrador #1415: this run's review came out off-format; without the cutoff
+    # the step fell back to the previous SHA's review and reported its count.
+    previous = _comment("github-actions[bot]", "SUMMARY: 2 BLOCKING, 0 WARNING, 0 NIT",
+                        created="2026-09-13T20:02:20Z", url="https://example/previous-sha")
+    current = _comment("github-actions[bot]", "SUMMARY: the 2 earlier BLOCKINGs are fixed",
+                       created="2026-09-13T20:43:14Z", url="https://example/current")
+    data = _cli([previous, current], "--since", "2026-09-13T20:30:00Z")
+    assert data == {"blocking": 0, "block": "", "url": "", "summary": "missing"}
+
+
+def test_cli_since_keeps_the_review_of_this_run():
+    body = "BLOCKING\n- a.py:1 bad\n\nSUMMARY: 1 BLOCKING, 0 WARNING, 0 NIT"
+    current = _comment("github-actions[bot]", body, created="2026-09-13T20:43:14Z",
+                       url="https://example/current")
+    data = _cli([current], "--since", "2026-09-13T20:30:00Z")
+    assert data["blocking"] == 1 and data["url"] == "https://example/current"
+    assert data["summary"] == "ok"

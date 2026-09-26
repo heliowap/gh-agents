@@ -27,3 +27,6 @@ def test_caller_and_callee_gates_and_concurrency_stay_aligned() -> None:
     assert lane_events
     assert lane_events == fixer_events
     assert caller_events == lane_events | {"pull_request", "workflow_run"}
+    # PyYAML's YAML 1.1 loader reads the Actions `on` key as True.
+    for caller in (dogfood, template):
+        assert set(caller.get("on", caller.get(True, {}))) == caller_events

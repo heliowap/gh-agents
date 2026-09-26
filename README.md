@@ -99,11 +99,11 @@ A label with no matching runner leaves the job queued forever — check
   review, with a notice, when the actor that triggered it has only `read` or
   no permission on the repo (typically a bot pushing to the PR); re-running
   the workflow as a maintainer reviews it.
-- **fix** — on comments containing `/oc` or `/opencode`, only from
+- **fix** — on PR comments containing `/oc` or `/opencode`, only from
   OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
   coarse pre-filter (`/ocaml` can queue a wasted run, never a wrong edit); the
-  action's own mention parsing is the real gate. On a PR it commits to the PR
-  branch; on an issue it opens a branch and a PR.
+  action's own mention parsing is the real gate. It commits to the PR branch;
+  commands on ordinary issues do not run.
 - **ci-doctor** — on `workflow_run` completed with `failure`: finds the
   associated PR, posts one diagnosis (probable cause, log evidence, suggested
   fix) ending in `<!-- ci-doctor:<sha> -->`, which is also the dedup key — one

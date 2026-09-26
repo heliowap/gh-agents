@@ -11,10 +11,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = ROOT / ".github/workflows/agents.yml"
+WORKFLOW = Path(os.environ.get("GH_AGENTS_WORKFLOW_UNDER_TEST", ROOT / ".github/workflows/agents.yml"))
 
 
 def _step(job: str, step_id: str) -> str:
@@ -92,6 +93,53 @@ def test_gate_fails_open_when_the_lookup_fails(tmp_path: Path) -> None:
     proc, _, output = _gate(tmp_path, "heliowap", None)
     assert proc.returncode == 0, proc.stderr
     assert "reviewable=true" in output
+
+
+# --- PR state before checkout (#28) -------------------------------------------
+
+def _pr_state(tmp_path: Path, job: str, responses: list[str]):
+    fake = (
+        "responses = json.loads(os.environ['GH_RESPONSES'])\n"
+        "call_number = len(open(os.environ['GH_CALLS']).read().splitlines())\n"
+        "state = responses[call_number - 1]\n"
+        "if state == 'ERROR': sys.exit(1)\n"
+        "print(state)\n"
+    )
+    env = _fake_gh(tmp_path, fake) | {"PR": "23", "GH_RESPONSES": json.dumps(responses)}
+    # The workflow waits between API attempts; the test only needs to observe
+    # that it makes the second call.
+    sleep = tmp_path / "bin" / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o755)
+    steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
+    assert steps[0]["id"] == "pr-state"
+    return _run(tmp_path, _step(job, "pr-state"), env, tmp_path)
+
+
+@pytest.mark.parametrize("job", ["review", "fix"])
+@pytest.mark.parametrize("state,expected_rc", [("OPEN", 0), ("MERGED", 1), ("CLOSED", 1)])
+def test_pr_state_is_reported_before_checkout(tmp_path: Path, job: str, state: str, expected_rc: int) -> None:
+    proc, calls, _ = _pr_state(tmp_path, job, [state])
+    assert proc.returncode == expected_rc, proc.stdout + proc.stderr
+    assert f"PR #23 is {state}" in proc.stdout
+    assert ("::error" in proc.stdout) == (state != "OPEN")
+    assert calls == [["pr", "view", "23", "--repo", "example/repo", "--json", "state", "--jq", ".state"]]
+
+
+@pytest.mark.parametrize("job", ["review", "fix"])
+def test_pr_state_retries_api_failure_once(tmp_path: Path, job: str) -> None:
+    proc, calls, _ = _pr_state(tmp_path, job, ["ERROR", "OPEN"])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PR #23 is OPEN" in proc.stdout
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("job", ["review", "fix"])
+def test_pr_state_fails_when_both_api_attempts_fail(tmp_path: Path, job: str) -> None:
+    proc, calls, _ = _pr_state(tmp_path, job, ["ERROR", "ERROR"])
+    assert proc.returncode == 1
+    assert "Could not determine the state of PR #23" in proc.stdout
+    assert len(calls) == 2
 
 
 # --- BLOCKING -> review-blocking issue (#20) ----------------------------------

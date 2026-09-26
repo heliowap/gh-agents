@@ -118,6 +118,30 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      - name: Check PR is still open
+        id: pr-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          state=""
+          for attempt in 1 2; do
+            if state="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"; then
+              break
+            fi
+            state=""
+            [ "$attempt" -eq 2 ] || sleep 2
+          done
+          case "$state" in
+            OPEN) echo "PR #${PR} is OPEN" ;;
+            MERGED|CLOSED)
+              echo "::error title=PR #${PR} ${state}::Review cannot run because PR #${PR} is ${state}."
+              exit 1 ;;
+            *)
+              echo "::error title=PR state unavailable::Could not determine the state of PR #${PR}."
+              exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -380,10 +404,11 @@ jobs:
 
   fix:
     name: Fix (/oc)
-    # Comments are untrusted input: only OWNER/MEMBER/COLLABORATOR, never a bot
-    # (a bot triggering the fixer would be a bot-triggered bot).
+    # Comments are untrusted input: only PR comments from
+    # OWNER/MEMBER/COLLABORATOR, never a bot (a bot must not trigger a bot).
     if: >-
       (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
+      && (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
       && github.event.comment.user.type != 'Bot'
       && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
@@ -395,6 +420,30 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      - name: Check PR is still open
+        id: pr-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          state=""
+          for attempt in 1 2; do
+            if state="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"; then
+              break
+            fi
+            state=""
+            [ "$attempt" -eq 2 ] || sleep 2
+          done
+          case "$state" in
+            OPEN) echo "PR #${PR} is OPEN" ;;
+            MERGED|CLOSED)
+              echo "::error title=PR #${PR} ${state}::Fix cannot run because PR #${PR} is ${state}."
+              exit 1 ;;
+            *)
+              echo "::error title=PR state unavailable::Could not determine the state of PR #${PR}."
+              exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

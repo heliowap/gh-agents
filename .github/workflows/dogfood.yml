@@ -39,16 +39,17 @@ jobs:
   agents:
     uses: ./.github/workflows/agents.yml
     # the callee's top-level concurrency never applies inside a caller run;
-    # group by event + target here so a comment can't race an in-flight
-    # review (intrador #1417)
+    # key the group by target only — including event_name would put a /oc
+    # comment in a different group and let it race the review it followed
+    # (intrador #1417). cancel-in-progress: false queues the newer run
+    # instead of killing the one in flight. For workflow_run the id is
+    # unique per triggering run — the group never collides there; ci-doctor
+    # dedup comes from its marker comment.
     concurrency:
-      # for workflow_run the id is unique per triggering run — the group
-      # never collides there; ci-doctor dedup comes from its marker comment
       group: >-
-        gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
-        || github.event.issue.number || github.event.workflow_run.id
-        || github.ref }}
-      cancel-in-progress: true
+        gh-agents-${{ github.event.pull_request.number || github.event.issue.number
+        || github.event.workflow_run.id }}
+      cancel-in-progress: false
     secrets:
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}

@@ -230,8 +230,10 @@ jobs:
           fi
           now="$(date +%s)"
           dur=$(( now - STARTED ))
-          cid="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=20&sort=created&direction=desc" \
-            --jq '[.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")))][0].id // empty')" || true
+          # O endpoint ignora sort/direction — vem em ordem crescente; `last`
+          # é o comentário mais recente desta rodada, não o de uma anterior.
+          cid="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
+            --jq '[.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")))] | last | .id // empty')" || true
           [ -n "$cid" ] || { echo "no review comment found to annotate"; exit 0; }
           IFS='|' read -r model tok cost <<<"$meta"
           mins=$(( dur / 60 )); secs=$(( dur % 60 ))

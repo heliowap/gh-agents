@@ -54,11 +54,17 @@ on:
 permissions:
   contents: read
 
-# One run per (event, target): comments get their own group so a comment never
-# cancels an in-flight review (intrador #1417).
+# Use a separate namespace from the caller job's group. If workflow-level
+# concurrency applies to a called workflow, both /oc comment events share a
+# fix lane and never interrupt an active fixer; reviews have their own lane.
+# Keep lanes and target expression aligned with both callers; the relation is
+# checked by scripts/tests/test_caller_workflows.py.
 concurrency:
-  group: gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.run_id }}
-  cancel-in-progress: true
+  group: >-
+    gh-agents-callee-${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && 'fix' || github.event_name }}-${{ github.event.pull_request.number
+    || github.event.issue.number || github.event.workflow_run.id
+    || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

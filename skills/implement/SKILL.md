@@ -9,5 +9,6 @@ Implement exactly what was asked, in the smallest diff that satisfies it.
 - No new abstractions, no new dependencies, no drive-by refactors.
 - Use `tdd` where a seam exists: failing test first, then the fix.
 - Run the focused test for what changed; run the wider suite once at the end.
-- Commit with Conventional Commits, referencing the issue/PR that asked.
+- Commit with Conventional Commits. For `/oc`, reference the PR; otherwise
+  reference the issue or PR that asked.
 - Ambiguous request? Stop and ask instead of guessing.

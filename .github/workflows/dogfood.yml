@@ -47,17 +47,22 @@ jobs:
         && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
         && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
       )
-    # the callee's top-level concurrency never applies inside a caller run;
-    # group by event + target here: with one group per PR, any comment —
+    # The caller job gates concurrency before invoking the callee; the callee
+    # mirrors these lanes in a separate namespace. Group by trigger lane +
+    # target here: with one group per PR, any comment —
     # another app's included — cancelled the in-flight review (intrador
     # #1417, run 34868746805). A queued run is replaced by the next arrival,
     # so a target-only group would let a plain comment drop a pending review.
+    # Both /oc comment event types share the fix lane so fixers for one PR
+    # cannot push concurrently to its branch.
+    # Keep lanes and target expression aligned with the template and callee;
+    # scripts/tests/test_caller_workflows.py checks the relation.
     concurrency:
       # for workflow_run the id is unique per triggering run — the group
       # never collides there; ci-doctor dedup comes from its marker comment.
       # Every declared event has a target; run_id isolates malformed payloads.
       group: >-
-        gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
+        gh-agents-${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && 'fix' || github.event_name }}-${{ github.event.pull_request.number
         || github.event.issue.number || github.event.workflow_run.id
         || github.run_id }}
       # A newer PR revision supersedes its review. Comments queue; a new

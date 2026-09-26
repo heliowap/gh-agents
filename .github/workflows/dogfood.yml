@@ -1,0 +1,51 @@
+name: agents
+
+# Dogfood: this repo reviews its own PRs with the workflow it ships.
+# `uses: ./` pins the callee to the same commit — a PR that changes
+# agents.yml is reviewed by the changed version, not by @v1.
+# Not a merge gate: review comments, a human merges.
+#
+# runs-on: ubuntu-latest by choice — the repo is public; self-hosted
+# runners serve private repos only (AGENTS.md invariant 3).
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  workflow_run:
+    workflows: ['*']   # narrowed by the ci_workflows input
+    types: [completed]
+
+# The reusable callee can only use what is granted here — this is the union
+# of its three jobs' permissions.
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  agents:
+    uses: ./.github/workflows/agents.yml
+    secrets:
+      FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+    with:
+      runs-on: ubuntu-latest
+      model: fireworks-ai/accounts/fireworks/models/glm-5p3-flash
+      model_fallbacks: fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash
+      ci_workflows: 'lint,build-runtime'
+      # Seed files (agents/, skills/, scripts/) come from the PR's branch when
+      # it lives in this repo — callee changes get exercised by their own PR.
+      # Fork PRs fall back to main: their head_ref does not exist here.
+      gh_agents_ref: >-
+        ${{
+          github.event.pull_request.head.repo.full_name == github.repository
+          && github.head_ref || 'main'
+        }}

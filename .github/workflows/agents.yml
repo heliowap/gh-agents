@@ -57,6 +57,8 @@ permissions:
 # Use a separate namespace from the caller job's group. If workflow-level
 # concurrency applies to a called workflow, both /oc comment events share a
 # fix lane and never interrupt an active fixer; reviews have their own lane.
+# Keep lanes and target expression aligned with both callers; the relation is
+# checked by scripts/tests/test_caller_workflows.py.
 concurrency:
   group: >-
     gh-agents-callee-${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && 'fix' || github.event_name }}-${{ github.event.pull_request.number

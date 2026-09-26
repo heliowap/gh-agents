@@ -55,6 +55,8 @@ jobs:
     # so a target-only group would let a plain comment drop a pending review.
     # Both /oc comment event types share the fix lane so fixers for one PR
     # cannot push concurrently to its branch.
+    # Keep lanes and target expression aligned with the template and callee;
+    # scripts/tests/test_caller_workflows.py checks the relation.
     concurrency:
       # for workflow_run the id is unique per triggering run — the group
       # never collides there; ci-doctor dedup comes from its marker comment.

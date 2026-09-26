@@ -52,6 +52,8 @@ jobs:
     # per PR let any comment kill it (intrador #1417).
     # Both /oc comment event types share the fix lane so fixers for one PR
     # cannot push concurrently to its branch.
+    # Keep lanes and target expression aligned with dogfood and callee;
+    # scripts/tests/test_caller_workflows.py checks the relation.
     # for workflow_run the id is unique per triggering run — the group never
     # collides there; ci-doctor dedup comes from its marker comment.
     # Every declared event has a target; run_id isolates malformed payloads.

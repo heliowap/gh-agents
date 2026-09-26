@@ -21,6 +21,10 @@ on:
         description: "OpenCode model for all agents."
         type: string
         default: "opencode-go/glm-5.3-flash"
+      model_fallbacks:
+        description: "Comma-separated provider/model fallbacks, live-probed in order; the first that answers is used."
+        type: string
+        default: ""
       use_container:
         description: "Run jobs in the gh-agents-runtime image. false = host (repos whose tests need Docker; less isolation)."
         type: boolean
@@ -37,9 +41,14 @@ on:
         description: "Comma-separated workflow names ci-doctor watches. Empty = all."
         type: string
         default: ""
+    # Which secret is required depends on the model's provider prefix —
+    # the Preflight step in each job checks the right one. `required: false`
+    # here so a fireworks-only caller isn't forced to set OPENCODE_API_KEY.
     secrets:
       OPENCODE_API_KEY:
-        required: true
+        required: false
+      FIREWORKS_API_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -108,19 +117,64 @@ jobs:
               echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
-      - name: Preflight OPENCODE_API_KEY
-        # fork PRs and missing secrets arrive as empty — fail with a readable error
+      - name: Preflight provider key
+        # fork PRs and missing secrets arrive as empty — fail with a readable
+        # error. The required secret follows the model's provider prefix.
         run: |
-          if [ -z "${OPENCODE_API_KEY:-}" ]; then
-            echo "::error::OPENCODE_API_KEY is empty — set the repo secret (README onboarding step 2) or check fork-PR secret withholding"
+          case "${MODEL%%/*}" in
+            fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
+            *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
+          esac
+          if [ -z "$key" ]; then
+            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2) or check fork-PR secret withholding"
             exit 1
           fi
         env:
+          MODEL: ${{ inputs.model }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+      - name: Ensure opencode CLI
+        # the runtime image already carries it; host mode installs on demand
+        run: |
+          command -v opencode >/dev/null || {
+            curl -fsSL https://opencode.ai/install | bash
+            echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          }
+      # Live-probe each candidate (primary then model_fallbacks, in order) with
+      # a minimal real call — a 402/5xx is only caught by actually calling the
+      # provider. The probe runs in a temp dir so opencode writes nothing into
+      # the caller's worktree.
+      - name: Resolve working model
+        id: model
+        env:
+          MODEL: ${{ inputs.model }}
+          FALLBACKS: ${{ inputs.model_fallbacks }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+        run: |
+          set -uo pipefail
+          IFS=',' read -ra candidates <<< "$MODEL,$FALLBACKS"
+          probe="$(mktemp -d)"
+          for m in "${candidates[@]}"; do
+            m="${m//[[:space:]]/}"
+            [ -z "$m" ] && continue
+            echo "probing $m"
+            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+              echo "model=$m" >> "$GITHUB_OUTPUT"
+              echo "using $m"
+              exit 0
+            fi
+            echo "::warning::$m did not respond — trying next candidate"
+          done
+          echo "::error::no candidate model responded — check provider keys and balances"
+          exit 1
+      - id: started
+        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
       - id: review
         uses: anomalyco/opencode/github@3a103fe0aff726a4edc7492f03f7b88195d9e4c9 # v2.0.16
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # the action commits whatever the agent produced; jobs have no git identity
           GIT_AUTHOR_NAME: "github-actions[bot]"
@@ -128,7 +182,7 @@ jobs:
           GIT_COMMITTER_NAME: "github-actions[bot]"
           GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
         with:
-          model: ${{ inputs.model }}
+          model: ${{ steps.model.outputs.model }}
           agent: reviewer
           use_github_token: true
           share: false
@@ -139,6 +193,54 @@ jobs:
             `BLOCKING`, `WARNING`, `NIT` — each finding as `path:line` plus why
             it matters, `(none)` under empty sections, and a final line exactly
             `SUMMARY: <n> BLOCKING, <n> WARNING, <n> NIT`. Do not edit files.
+      # Cost attribution on the review comment itself: the action posts as
+      # github-actions[bot] and writes the session under $HOME; we read the
+      # newest session's usage and append a footer. Best-effort — a failure
+      # here must never fail the review.
+      - name: Annotate review comment with usage
+        if: steps.review.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          STARTED: ${{ steps.started.outputs.at }}
+        run: |
+          set -uo pipefail
+          sid="$(opencode session list -n 20 --format json 2>/dev/null | jq -r --arg d "$PWD" '[.[] | select(.directory == $d)][0].id // empty')" || true
+          meta=""
+          if [ -n "$sid" ]; then
+            export_file="$(mktemp)"
+            opencode export "$sid" > "$export_file" 2>/dev/null || true
+            meta="$(python3 - "$export_file" <<'PY' || true
+          import json,sys
+          try:
+              d=json.load(open(sys.argv[1]))
+          except Exception:
+              sys.exit(0)
+          tok=0; cost=0.0; prov=model=None
+          for m in d.get("messages",[]):
+              i=m.get("info",{})
+              t=i.get("tokens")
+              if not t: continue
+              tok+=t.get("total",0); cost+=i.get("cost",0.0) or 0.0
+              prov=i.get("providerID") or prov; model=i.get("modelID") or model
+          if prov and model:
+              print(f"{prov}/{model}|{tok}|{cost:.4f}")
+          PY
+          )"
+          fi
+          now="$(date +%s)"
+          dur=$(( now - STARTED ))
+          cid="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=20&sort=created&direction=desc" \
+            --jq '[.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")))][0].id // empty')" || true
+          [ -n "$cid" ] || { echo "no review comment found to annotate"; exit 0; }
+          IFS='|' read -r model tok cost <<<"$meta"
+          mins=$(( dur / 60 )); secs=$(( dur % 60 ))
+          footer="<sub>review by ${model:-unknown} · ${mins}m${secs}s$( [ -n "$tok" ] && printf ' · %s tokens' "$tok" )$( [ -n "$cost" ] && printf ' · $%s' "$cost" )</sub>"
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" --jq .body)"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" -f body="$body
+          
+          $footer" >/dev/null
+          echo "annotated comment $cid"
       # BLOCKING becomes a `review-blocking` issue; WARNING/NIT do not. One
       # issue per PR (key `PR #N` in title); a closed one reopens on new
       # BLOCKING. Only when the action succeeded — a failed review has no SUMMARY.
@@ -227,17 +329,55 @@ jobs:
               echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
-      - name: Preflight OPENCODE_API_KEY
+      - name: Preflight provider key
         run: |
-          if [ -z "${OPENCODE_API_KEY:-}" ]; then
-            echo "::error::OPENCODE_API_KEY is empty — set the repo secret (README onboarding step 2)"
+          case "${MODEL%%/*}" in
+            fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
+            *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
+          esac
+          if [ -z "$key" ]; then
+            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2)"
             exit 1
           fi
         env:
+          MODEL: ${{ inputs.model }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+      - name: Ensure opencode CLI
+        # the runtime image already carries it; host mode installs on demand
+        run: |
+          command -v opencode >/dev/null || {
+            curl -fsSL https://opencode.ai/install | bash
+            echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+          }
+      - name: Resolve working model
+        id: model
+        env:
+          MODEL: ${{ inputs.model }}
+          FALLBACKS: ${{ inputs.model_fallbacks }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+        run: |
+          set -uo pipefail
+          IFS=',' read -ra candidates <<< "$MODEL,$FALLBACKS"
+          probe="$(mktemp -d)"
+          for m in "${candidates[@]}"; do
+            m="${m//[[:space:]]/}"
+            [ -z "$m" ] && continue
+            echo "probing $m"
+            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+              echo "model=$m" >> "$GITHUB_OUTPUT"
+              echo "using $m"
+              exit 0
+            fi
+            echo "::warning::$m did not respond — trying next candidate"
+          done
+          echo "::error::no candidate model responded — check provider keys and balances"
+          exit 1
       - uses: anomalyco/opencode/github@3a103fe0aff726a4edc7492f03f7b88195d9e4c9 # v2.0.16
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # the action commits whatever the agent produced; jobs have no git identity
           GIT_AUTHOR_NAME: "github-actions[bot]"
@@ -245,7 +385,7 @@ jobs:
           GIT_COMMITTER_NAME: "github-actions[bot]"
           GIT_COMMITTER_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
         with:
-          model: ${{ inputs.model }}
+          model: ${{ steps.model.outputs.model }}
           agent: fixer
           use_github_token: true
           share: false
@@ -299,14 +439,20 @@ jobs:
               echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
-      - name: Preflight OPENCODE_API_KEY
+      - name: Preflight provider key
         run: |
-          if [ -z "${OPENCODE_API_KEY:-}" ]; then
-            echo "::error::OPENCODE_API_KEY is empty — set the repo secret (README onboarding step 2)"
+          case "${MODEL%%/*}" in
+            fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
+            *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
+          esac
+          if [ -z "$key" ]; then
+            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2)"
             exit 1
           fi
         env:
+          MODEL: ${{ inputs.model }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
       # Dedup is deterministic, not LLM-decided: one diagnosis per (run, sha),
       # keyed by the <!-- ci-doctor:<sha> --> marker the agent must append.
       - name: Resolve PR and dedup
@@ -341,12 +487,38 @@ jobs:
             curl -fsSL https://opencode.ai/install | bash
             echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
           }
+      - name: Resolve working model
+        id: model
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          MODEL: ${{ inputs.model }}
+          FALLBACKS: ${{ inputs.model_fallbacks }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+        run: |
+          set -uo pipefail
+          IFS=',' read -ra candidates <<< "$MODEL,$FALLBACKS"
+          probe="$(mktemp -d)"
+          for m in "${candidates[@]}"; do
+            m="${m//[[:space:]]/}"
+            [ -z "$m" ] && continue
+            echo "probing $m"
+            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+              echo "model=$m" >> "$GITHUB_OUTPUT"
+              echo "using $m"
+              exit 0
+            fi
+            echo "::warning::$m did not respond — trying next candidate"
+          done
+          echo "::error::no candidate model responded — check provider keys and balances"
+          exit 1
       - name: Diagnose failed run
         if: steps.gate.outputs.skip == 'false'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          MODEL: ${{ inputs.model }}
+          MODEL: ${{ steps.model.outputs.model }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}

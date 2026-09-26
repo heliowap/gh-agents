@@ -13,10 +13,11 @@ required beyond a secret.
    runner/enable-repo.sh owner/repo 2
    ```
 
-2. Give the repo the model key:
+2. Give the repo the key for the model's provider:
 
    ```bash
-   gh secret set OPENCODE_API_KEY --repo owner/repo
+   gh secret set OPENCODE_API_KEY --repo owner/repo      # opencode-go models (default)
+   gh secret set FIREWORKS_API_KEY --repo owner/repo     # fireworks/… models
    ```
 
 3. Copy `templates/caller-agents.yml` to `.github/workflows/agents.yml` in the
@@ -29,18 +30,24 @@ required beyond a secret.
 
 ## Inputs
 
-All inputs are optional; `secrets: inherit` plus `OPENCODE_API_KEY` is enough.
+All inputs are optional; `secrets: inherit` plus the provider key is enough.
 
 | Input | Default | Meaning |
 |---|---|---|
 | `runs-on` | `self-hosted` | Runner label fallback; the repo's `vars.AGENT_RUNNER` wins. |
 | `model` | `opencode-go/glm-5.3-flash` | OpenCode model for all agents. |
+| `model_fallbacks` | empty | Comma-separated `provider/model` fallbacks; every candidate is live-probed and the first that answers is used. |
 | `use_container` | `true` | Run jobs in the runtime image; `false` runs on the host. |
 | `runtime_image` | `ghcr.io/heliowap/gh-agents-runtime:v1` | Job image when `use_container` is true. |
 | `gh_agents_ref` | `v1` | Ref of this repo used for default agents/skills/scripts. |
 | `ci_workflows` | empty = all | Comma-separated workflow names ci-doctor watches. |
 
-Required secret: `OPENCODE_API_KEY` (arrives via `secrets: inherit`).
+Secrets (arrive via `secrets: inherit` or explicit mapping): the preflight
+requires the key matching the `model` provider — `OPENCODE_API_KEY` for
+`opencode-go/…` (the default), `FIREWORKS_API_KEY` for `fireworks/…`. The
+Fireworks provider is declared in the default `agents/opencode.json`
+(OpenAI-compatible endpoint, key via `{env:FIREWORKS_API_KEY}`); a caller's
+own `opencode.json` can declare others the same way.
 
 ## Runner switch
 
@@ -88,7 +95,7 @@ win; a repo with neither gets this repo's defaults copied in at run time.
 ## Security model
 
 - This repo is public so cross-owner callers can use it; it contains no
-  secrets and no private topology. `OPENCODE_API_KEY` arrives at run time via
+  secrets and no private topology. Provider keys arrive at run time via
   `secrets: inherit` — nothing is stored or echoed.
 - External actions are pinned by full commit SHA; callers pin this workflow by
   tag (`@v1`). `main` is protected.
@@ -103,7 +110,7 @@ win; a repo with neither gets this repo's defaults copied in at run time.
 - Permissions are minimal per job; no job has `actions: write`. The operator
   PAT used by `runner/` scripts lives in the operator's shell, never in a
   workflow or secret.
-- Fork PRs get no secrets: jobs fail fast on an empty `OPENCODE_API_KEY`.
+- Fork PRs get no secrets: jobs fail fast on an empty provider key.
 
 ## Reserved paths
 

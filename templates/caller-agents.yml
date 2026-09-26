@@ -33,7 +33,9 @@ jobs:
   agents:
     uses: heliowap/gh-agents/.github/workflows/agents.yml@v1
     # the callee's top-level concurrency never applies inside a caller run;
-    # group by event + target here so a comment can't race an in-flight review
+    # group by event + target here so a comment can't race an in-flight review.
+    # for workflow_run the id is unique per triggering run — the group never
+    # collides there; ci-doctor dedup comes from its marker comment
     concurrency:
       group: >-
         gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number

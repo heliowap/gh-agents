@@ -19,8 +19,9 @@ on:
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    # exact workflow names — this filter takes no globs ('*' never matches),
-    # and `agents` itself stays out so a finished run can't retrigger itself
+    # exact workflow names — this filter takes no globs ('*' never matches);
+    # keep it in sync with ci_workflows and leave `agents` itself out so a
+    # finished run can't retrigger itself
     workflows: ['lint', 'build-runtime']
     types: [completed]
 
@@ -39,6 +40,8 @@ jobs:
     # group by event + target here so a comment can't race an in-flight
     # review (intrador #1417)
     concurrency:
+      # for workflow_run the id is unique per triggering run — the group
+      # never collides there; ci-doctor dedup comes from its marker comment
       group: >-
         gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
         || github.event.issue.number || github.event.workflow_run.id
@@ -55,10 +58,14 @@ jobs:
       # seeds (agents/, skills/, scripts/) from the PR's own branch — callee
       # and config changes get exercised by the PR that changes them.
       # pull_request and review_comment payloads carry pull_request.head;
-      # issue_comment and workflow_run do not → 'main'. Fork PRs also get
-      # 'main': their head ref does not exist in this repo.
+      # issue_comment on a PR only has issue.pull_request → refs/pull/N/head,
+      # which resolves fork heads too (/oc is collaborator-gated). workflow_run
+      # and /oc on plain issues fall to 'main'.
       gh_agents_ref: >-
         ${{
-          github.event.pull_request.head.repo.full_name == github.repository
-          && github.event.pull_request.head.ref || 'main'
+          (github.event.pull_request.head.repo.full_name == github.repository
+            && github.event.pull_request.head.ref)
+          || (github.event.issue.pull_request
+            && format('refs/pull/{0}/head', github.event.issue.number))
+          || 'main'
         }}

@@ -208,7 +208,9 @@ jobs:
           SINCE: ${{ steps.started.outputs.at }}
         run: |
           set -uo pipefail
-          sid="$(opencode session list -n 20 --format json 2>/dev/null | jq -r --arg d "$PWD" '[.[] | select(.directory == $d)][0].id // empty')" || true
+          # HOME do self-hosted persiste entre runs — created >= STARTED
+          # impede pegar a sessão de um /oc concorrente no mesmo workspace.
+          sid="$(opencode session list -n 20 --format json 2>/dev/null | jq -r --arg d "$PWD" --argjson t "$STARTED" '[.[] | select(.directory == $d and .created >= ($t * 1000))][0].id // empty')" || true
           meta=""
           if [ -n "$sid" ]; then
             export_file="$(mktemp)"

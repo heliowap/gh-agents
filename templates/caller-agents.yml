@@ -57,4 +57,4 @@ jobs:
     #   model: opencode-go/glm-5.3-flash
     #   model_fallbacks: 'a/1,b/2'  # probed in order; first responding model wins
     #   use_container: true         # false = run on host (tests needing Docker)
-    #   ci_workflows: 'ci,qe'       # empty = watch all failed runs
+    #   ci_workflows: 'ci,qe'       # empty = all; widen `workflows:` above to match

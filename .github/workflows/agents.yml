@@ -39,7 +39,7 @@ on:
         type: string
         default: "v1"
       ci_workflows:
-        description: "Comma-separated workflow names ci-doctor watches. Empty = all."
+        description: "Comma-separated workflow names ci-doctor watches, narrowed from the caller's `on.workflow_run.workflows` list. Empty = all of those — the trigger still needs every CI workflow named there."
         type: string
         default: ""
     # Which secret is required depends on the model's provider prefix —

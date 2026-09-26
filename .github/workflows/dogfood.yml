@@ -19,11 +19,8 @@ on:
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    # name the CI workflows and keep it in sync with ci_workflows — '*' is
-    # not the dead filter it looks like: on main it behaved as match-all and
-    # woke this workflow on every `lint` completion (the callee's `if` then
-    # skipped every job). GitHub suppresses a workflow retriggering itself,
-    # so `agents` completing never fired this again.
+    # exact workflow names, kept in sync with ci_workflows — `on:` can't
+    # read expressions, so this list alone decides when ci-doctor wakes
     workflows: ['lint', 'build-runtime']
     types: [completed]
 

@@ -53,7 +53,7 @@ another org or account maps it explicitly, or the key arrives empty:
 | `use_container` | `true` | Run jobs in the runtime image; `false` runs on the host. |
 | `runtime_image` | `ghcr.io/heliowap/gh-agents-runtime:v1` | Job image when `use_container` is true. |
 | `gh_agents_ref` | `v1` | Ref of this repo used for default agents/skills/scripts. |
-| `ci_workflows` | empty = all | Comma-separated workflow names ci-doctor watches. |
+| `ci_workflows` | empty = all | Comma-separated workflow names ci-doctor watches — it only narrows what the caller's `on.workflow_run.workflows` list already woke; watch-all needs every CI workflow named there. |
 
 Secrets (arrive via `secrets: inherit` or explicit mapping): the preflight
 requires the key matching the `model` provider — `OPENCODE_API_KEY` for

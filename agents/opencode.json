@@ -48,7 +48,7 @@
         "webfetch": "deny",
         "websearch": "deny"
       },
-      "prompt": "You execute the request in the `/oc` (or `/opencode`) comment. Load the `implement` skill; if the request describes a bug, also load `diagnosing-bugs` and reproduce before fixing; if you add a test, load `tdd`. Follow the repo's AGENTS.md. Smallest diff that satisfies the request: no new abstraction, no new dependency. Run the focused test for what changed before committing. Commit with Conventional Commits referencing the issue or PR. If the request is ambiguous or asks for something the commenter cannot reasonably intend, stop and ask on the PR instead of guessing."
+      "prompt": "You execute the request in the `/oc` (or `/opencode`) comment. Load the `implement` skill; if the request describes a bug, also load `diagnosing-bugs` and reproduce before fixing; if you add a test, load `tdd`. Follow the repo's AGENTS.md. Smallest diff that satisfies the request: no new abstraction, no new dependency. Run the focused test for what changed before committing. Commit with Conventional Commits referencing the PR. If the request is ambiguous or asks for something the commenter cannot reasonably intend, stop and ask on the PR instead of guessing."
     },
     "ci-doctor": {
       "mode": "primary",

@@ -169,7 +169,9 @@ jobs:
           echo "::error::no candidate model responded — check provider keys and balances"
           exit 1
       - id: started
-        run: echo "at=$(date +%s)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
+          echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - id: review
         uses: anomalyco/opencode/github@3a103fe0aff726a4edc7492f03f7b88195d9e4c9 # v2.0.16
         env:
@@ -202,7 +204,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          STARTED: ${{ steps.started.outputs.at }}
+          STARTED: ${{ steps.started.outputs.ts }}
+          SINCE: ${{ steps.started.outputs.at }}
         run: |
           set -uo pipefail
           sid="$(opencode session list -n 20 --format json 2>/dev/null | jq -r --arg d "$PWD" '[.[] | select(.directory == $d)][0].id // empty')" || true
@@ -210,14 +213,15 @@ jobs:
           if [ -n "$sid" ]; then
             export_file="$(mktemp)"
             opencode export "$sid" > "$export_file" 2>/dev/null || true
-            meta="$(python3 - "$export_file" <<'PY' || true
+            meta="$(python3 - "$export_file" <<'PY' 2>/dev/null || true
           import json,sys
           try:
               d=json.load(open(sys.argv[1]))
+              msgs=d.get("messages",[])
           except Exception:
               sys.exit(0)
           tok=0; cost=0.0; prov=model=None
-          for m in d.get("messages",[]):
+          for m in msgs:
               i=m.get("info",{})
               t=i.get("tokens")
               if not t: continue
@@ -231,17 +235,20 @@ jobs:
           now="$(date +%s)"
           dur=$(( now - STARTED ))
           # O endpoint ignora sort/direction — vem em ordem crescente; `last`
-          # é o comentário mais recente desta rodada, não o de uma anterior.
+          # + corte `created_at >= SINCE` pegam o comentário desta rodada e
+          # nunca um de run anterior (que já estaria anotado).
+          # shellcheck disable=SC2016  # $since é variável jq (--arg), não shell
           cid="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
-            --jq '[.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")))] | last | .id // empty')" || true
+            --jq --arg since "$SINCE" '[.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")) and (.created_at >= $since))] | last | .id // empty')" || true
           [ -n "$cid" ] || { echo "no review comment found to annotate"; exit 0; }
           IFS='|' read -r model tok cost <<<"$meta"
           mins=$(( dur / 60 )); secs=$(( dur % 60 ))
           footer="<sub>review by ${model:-unknown} · ${mins}m${secs}s$( [ -n "$tok" ] && printf ' · %s tokens' "$tok" )$( [ -n "$cost" ] && printf ' · $%s' "$cost" )</sub>"
-          body="$(gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" --jq .body)"
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" --jq .body)" || true
+          [ -n "$body" ] || { echo "comment body fetch failed; skipping"; exit 0; }
           gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" -f body="$body
           
-          $footer" >/dev/null
+          $footer" >/dev/null || { echo "PATCH failed"; exit 0; }
           echo "annotated comment $cid"
       # BLOCKING becomes a `review-blocking` issue; WARNING/NIT do not. One
       # issue per PR (key `PR #N` in title); a closed one reopens on new

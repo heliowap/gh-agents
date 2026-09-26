@@ -28,6 +28,11 @@ required beyond a secret.
 5. Optional: install the GitHub App `gh-agents-ops` to switch runner backends
    from a panel instead of the CLI.
 
+This repo dogfoods: `.github/workflows/dogfood.yml` calls the local
+`agents.yml` via `uses: ./`, so a PR that changes the reusable workflow is
+reviewed by the changed version. It runs on `ubuntu-latest` — the repo is
+public, and self-hosted runners serve private repos only.
+
 ## Inputs
 
 All inputs are optional; `secrets: inherit` plus the provider key is enough.

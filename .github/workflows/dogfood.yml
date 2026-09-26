@@ -60,9 +60,10 @@ jobs:
       # seeds (agents/, skills/, scripts/) from the PR's own branch — callee
       # and config changes get exercised by the PR that changes them.
       # pull_request and review_comment payloads carry pull_request.head;
-      # issue_comment on a PR only has issue.pull_request → refs/pull/N/head,
-      # which resolves fork heads too (/oc is collaborator-gated). workflow_run
-      # and /oc on plain issues fall to 'main'.
+      # issue_comment on a PR only has issue.pull_request → refs/pull/N/head
+      # (issue.number == PR number — shared sequence), which resolves fork
+      # heads too (/oc is collaborator-gated). workflow_run and /oc on
+      # plain issues fall to 'main'.
       gh_agents_ref: >-
         ${{
           (github.event.pull_request.head.repo.full_name == github.repository

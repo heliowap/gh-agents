@@ -16,10 +16,10 @@ on:
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    # exact workflow names, kept in sync with ci_workflows — '*' behaves as
-    # match-all (wakes this workflow on every completed run; the callee's
-    # `if` then skips all jobs). Listing only the CI workflows keeps
-    # unrelated completions from paying a run.
+    # set this to your CI workflow names — the filter takes exact names and
+    # `on:` can't read expressions, so this list is what decides when
+    # ci-doctor wakes; keep it in sync with ci_workflows. Leaving 'ci' on a
+    # repo whose CI has another name means ci-doctor silently never fires.
     workflows: ['ci']
     types: [completed]
 

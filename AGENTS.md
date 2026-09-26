@@ -17,7 +17,8 @@ user can see.
 ## Invariants: never break these
 
 1. **No secrets, no private topology.** The repo is public; secrets arrive at
-   run time via `secrets: inherit`, never stored or echoed.
+   run time via `secrets: inherit` (same owner) or explicit mapping (other
+   owners), never stored or echoed.
 2. **External actions pinned by full SHA** with a version comment; callers
    pin gh-agents by tag (`@v1`), moved only on deliberate release.
 3. **Self-hosted runners serve private repos only** — `enable-*.sh` checks

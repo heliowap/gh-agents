@@ -2,7 +2,8 @@ name: gh-agents
 
 # Reusable workflow: automatic PR review, `/oc` fix on comments, CI-failure
 # diagnosis. Called via `uses: heliowap/gh-agents/.github/workflows/agents.yml@v1`
-# with `secrets: inherit`. What this workflow is NOT:
+# with `secrets: inherit` (same owner) or explicit secret mapping (other
+# owners — `inherit` does not cross owners). What this workflow is NOT:
 #   - a merge gate. The reviewer comments; the human decides.
 #   - CI auto-fix. ci-doctor diagnoses; fixing is a human decision or `/oc`.
 #

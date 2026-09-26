@@ -87,7 +87,10 @@ A label with no matching runner leaves the job queued forever — check
   0, a `review-blocking` issue is opened (one per PR; a closed one reopens).
   Only this run's review counts; with no `SUMMARY` line the step leaves a
   warning instead of guessing zero. The reviewer is read-only and never
-  approves — it comments, a human decides. A `Review gate` job skips the
+  approves — it comments, a human decides. The job pins the agent through
+  inline config (the opencode action ignores its `agent:` input) and then
+  checks the session: a review that did not run as `reviewer` fails red. The
+  `/oc` fixer gets the same pin and check. A `Review gate` job skips the
   review, with a notice, when the actor that triggered it has only `read` or
   no permission on the repo (typically a bot pushing to the PR); re-running
   the workflow as a maintainer reviews it.

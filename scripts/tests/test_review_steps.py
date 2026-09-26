@@ -18,8 +18,18 @@ WORKFLOW = ROOT / ".github/workflows/agents.yml"
 
 
 def _step(job: str, step_id: str) -> str:
+    return _step_def(job, step_id)["run"]
+
+
+def _step_def(job: str, step_id: str) -> dict:
     steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
-    return next(s for s in steps if s.get("id") == step_id)["run"]
+    return next(s for s in steps if s.get("id") == step_id)
+
+
+def _literal_env(job: str, step_id: str) -> dict:
+    """The step's env entries that are plain values (expressions are doubled by the test)."""
+    env = _step_def(job, step_id).get("env") or {}
+    return {k: str(v) for k, v in env.items() if "${{" not in str(v)}
 
 
 def _fake_gh(tmp_path: Path, body: str) -> dict:
@@ -144,3 +154,69 @@ def test_blocking_reopens_the_closed_issue_of_the_same_pr(tmp_path: Path) -> Non
     assert ["issue", "reopen", "7"] in calls
     assert any(c[:3] == ["issue", "comment", "7"] for c in calls)
     assert not any(c[:2] == ["issue", "create"] for c in calls)
+
+
+# --- the session ran as the pinned agent (#25) --------------------------------
+
+def _agent_check(tmp_path: Path, job: str, sessions: list[dict], agents_by_session: dict):
+    """Fake `opencode`: `session list` answers `sessions`, `export <id>` answers
+    messages carrying the agent recorded for that session."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / ".gh-agents").symlink_to(ROOT)
+    for s in sessions:
+        s.setdefault("directory", str(workspace))
+    opencode = tmp_path / "bin" / "opencode"
+    opencode.parent.mkdir(exist_ok=True)
+    opencode.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\n"
+        f"sessions = {sessions!r}\n"
+        f"agents = {agents_by_session!r}\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['session', 'list']:\n"
+        "    print(json.dumps(sessions))\n"
+        "elif args[0] == 'export':\n"
+        "    msgs = [{'info': {'role': 'assistant', 'agent': a}} for a in agents[args[1]]]\n"
+        "    print(json.dumps({'messages': msgs}))\n"
+    )
+    opencode.chmod(0o755)
+    env = _literal_env(job, "agent-check") | {"PATH": f"{opencode.parent}:{os.environ['PATH']}", "STARTED": "1000"}
+    return _run(tmp_path, _step(job, "agent-check"), env, workspace)
+
+
+def test_agent_check_fails_the_review_that_ran_as_build(tmp_path: Path) -> None:
+    proc, _, _ = _agent_check(tmp_path, "review", [{"id": "root", "created": 1_000_500}],
+                              {"root": ["build", "build"]})
+    assert proc.returncode == 1
+    assert "::error" in proc.stdout and "build" in proc.stdout
+
+
+def test_agent_check_passes_the_review_that_ran_as_reviewer(tmp_path: Path) -> None:
+    proc, _, _ = _agent_check(tmp_path, "review", [{"id": "root", "created": 1_000_500}],
+                              {"root": ["reviewer"]})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "::warning" not in proc.stdout and "ran as 'reviewer'" in proc.stdout
+
+
+def test_agent_check_reads_the_root_session_not_a_newer_subagent_one(tmp_path: Path) -> None:
+    # the reviewer spawns `general` subagents: child sessions, created later
+    sessions = [{"id": "child", "parentID": "root", "created": 1_000_900},
+                {"id": "root", "created": 1_000_500},
+                {"id": "stale", "created": 999_000}]
+    proc, _, _ = _agent_check(tmp_path, "review", sessions,
+                              {"root": ["reviewer"], "child": ["general"], "stale": ["build"]})
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "::warning" not in proc.stdout and "ran as 'reviewer'" in proc.stdout
+
+
+def test_agent_check_fails_the_fix_that_ran_as_build(tmp_path: Path) -> None:
+    proc, _, _ = _agent_check(tmp_path, "fix", [{"id": "root", "created": 1_000_500}],
+                              {"root": ["build"]})
+    assert proc.returncode == 1
+
+
+def test_agent_check_without_a_session_warns_instead_of_passing_silently(tmp_path: Path) -> None:
+    proc, _, _ = _agent_check(tmp_path, "review", [], {})
+    assert proc.returncode == 0
+    assert "::warning" in proc.stdout

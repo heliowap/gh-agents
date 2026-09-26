@@ -253,12 +253,17 @@ jobs:
             echo "::warning title=Agent not verified::no opencode session from this run found; cannot prove the job ran as $AGENT"
             exit 0
           fi
+          # to a file, as the annotate step does: piped, a large export reached
+          # the parser as non-JSON (All-Medical/AllMedical run 36231334489)
+          export_file="$(mktemp)"
+          opencode export "$sid" > "$export_file" 2>/dev/null || true
           rc=0
-          out="$(opencode export "$sid" 2>/dev/null | python3 .gh-agents/scripts/session_agent.py --expect "$AGENT")" || rc=$?
+          out="$(python3 .gh-agents/scripts/session_agent.py --expect "$AGENT" < "$export_file")" || rc=$?
           echo "$out"
           case "$rc" in
             0) ;;
-            2) echo "::warning title=Agent not verified::$out" ;;
+            2) echo "::warning title=Agent not verified::$out (session $sid, export $(wc -c < "$export_file") bytes)"
+               head -c 300 "$export_file"; echo ;;
             *) echo "::error title=Agent not pinned::$out — the $AGENT sandbox did not apply (heliowap/gh-agents#25)"; exit 1 ;;
           esac
       # Cost attribution on the review comment itself: the action posts as
@@ -505,12 +510,17 @@ jobs:
             echo "::warning title=Agent not verified::no opencode session from this run found; cannot prove the job ran as $AGENT"
             exit 0
           fi
+          # to a file, as the annotate step does: piped, a large export reached
+          # the parser as non-JSON (All-Medical/AllMedical run 36231334489)
+          export_file="$(mktemp)"
+          opencode export "$sid" > "$export_file" 2>/dev/null || true
           rc=0
-          out="$(opencode export "$sid" 2>/dev/null | python3 .gh-agents/scripts/session_agent.py --expect "$AGENT")" || rc=$?
+          out="$(python3 .gh-agents/scripts/session_agent.py --expect "$AGENT" < "$export_file")" || rc=$?
           echo "$out"
           case "$rc" in
             0) ;;
-            2) echo "::warning title=Agent not verified::$out" ;;
+            2) echo "::warning title=Agent not verified::$out (session $sid, export $(wc -c < "$export_file") bytes)"
+               head -c 300 "$export_file"; echo ;;
             *) echo "::error title=Agent not pinned::$out — the $AGENT sandbox did not apply (heliowap/gh-agents#25)"; exit 1 ;;
           esac
 

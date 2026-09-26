@@ -7,20 +7,21 @@ name: agents
 #
 # runs-on: ubuntu-latest by choice — the repo is public; self-hosted
 # runners serve private repos only (AGENTS.md invariant 3).
+# No paths-ignore: specs/conventions are the product surface here —
+# doc-only PRs get reviewed too.
 
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    workflows: ['*']   # narrowed by the ci_workflows input
+    # exact workflow names, kept in sync with ci_workflows — `on:` can't
+    # read expressions, so this list alone decides when ci-doctor wakes
+    workflows: ['lint', 'build-runtime']
     types: [completed]
 
 # The reusable callee can only use what is granted here — this is the union
@@ -34,18 +35,52 @@ permissions:
 jobs:
   agents:
     uses: ./.github/workflows/agents.yml
+    # Only trusted PR commands enter concurrency. Otherwise an unrelated
+    # comment can replace a pending /oc request; plain issues never run fix.
+    if: >-
+      github.event_name == 'pull_request'
+      || github.event_name == 'workflow_run'
+      || (
+        ((github.event_name == 'issue_comment' && github.event.issue.pull_request)
+          || github.event_name == 'pull_request_review_comment')
+        && github.event.comment.user.type != 'Bot'
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
+      )
+    # the callee's top-level concurrency never applies inside a caller run;
+    # group by event + target here: with one group per PR, any comment —
+    # another app's included — cancelled the in-flight review (intrador
+    # #1417, run 34868746805). A queued run is replaced by the next arrival,
+    # so a target-only group would let a plain comment drop a pending review.
+    concurrency:
+      # for workflow_run the id is unique per triggering run — the group
+      # never collides there; ci-doctor dedup comes from its marker comment.
+      # Every declared event has a target; run_id isolates malformed payloads.
+      group: >-
+        gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
+        || github.event.issue.number || github.event.workflow_run.id
+        || github.run_id }}
+      # A newer PR revision supersedes its review. Comments queue; a new
+      # /oc request must not interrupt a fixer already editing the branch.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     secrets:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
     with:
       runs-on: ubuntu-latest
       model: fireworks-ai/accounts/fireworks/models/glm-5p3-flash
       model_fallbacks: fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash
       ci_workflows: 'lint,build-runtime'
-      # Seed files (agents/, skills/, scripts/) come from the PR's branch when
-      # it lives in this repo — callee changes get exercised by their own PR.
-      # Fork PRs fall back to main: their head_ref does not exist here.
+      # seeds (agents/, skills/, scripts/) from the PR's own branch when it
+      # lives in this repo — callee and config changes get exercised by the
+      # PR that changes them. Never a fork head: the fix job copies the seed
+      # opencode.json to the root (this repo has none), and a fork could
+      # declare a local MCP command that runs with the provider keys and a
+      # contents: write token. issue_comment carries no head repo, so
+      # comment-triggered runs, workflow_run and forks all seed from 'main'.
       gh_agents_ref: >-
         ${{
-          github.event.pull_request.head.repo.full_name == github.repository
-          && github.head_ref || 'main'
+          (github.event.pull_request.head.repo.full_name == github.repository
+            && github.event.pull_request.head.ref)
+          || 'main'
         }}

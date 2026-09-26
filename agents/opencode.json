@@ -42,7 +42,7 @@
     },
     "fixer": {
       "mode": "primary",
-      "description": "Executes a fix request made via /oc or /opencode comment on a PR or issue. Write-capable by design: the requester asked for a change.",
+      "description": "Executes a fix request made via /oc or /opencode comment on a PR. Write-capable by design: the requester asked for a change.",
       "model": "opencode-go/glm-5.3-flash",
       "permission": {
         "webfetch": "deny",

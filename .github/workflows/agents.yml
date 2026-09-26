@@ -39,7 +39,7 @@ on:
         type: string
         default: "v1"
       ci_workflows:
-        description: "Comma-separated workflow names ci-doctor watches. Empty = all."
+        description: "Comma-separated workflow names ci-doctor watches, narrowed from the caller's `on.workflow_run.workflows` list. Empty = all of those — the trigger still needs every CI workflow named there."
         type: string
         default: ""
     # Which secret is required depends on the model's provider prefix —
@@ -57,7 +57,7 @@ permissions:
 # One run per (event, target): comments get their own group so a comment never
 # cancels an in-flight review (intrador #1417).
 concurrency:
-  group: gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.ref }}
+  group: gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -118,6 +118,30 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      - name: Check PR is still open
+        id: pr-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          state=""
+          for attempt in 1 2; do
+            if state="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"; then
+              break
+            fi
+            state=""
+            [ "$attempt" -eq 2 ] || sleep 2
+          done
+          case "$state" in
+            OPEN) echo "PR #${PR} is OPEN" ;;
+            MERGED|CLOSED)
+              echo "::error title=PR #${PR} ${state}::Review cannot run because PR #${PR} is ${state}."
+              exit 1 ;;
+            *)
+              echo "::error title=PR state unavailable::Could not determine the state of PR #${PR}."
+              exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -310,15 +334,16 @@ jobs:
           fi
           now="$(date +%s)"
           dur=$(( now - STARTED ))
-          # O endpoint ignora sort/direction — vem em ordem crescente; `last`
-          # + corte `created_at >= SINCE` pegam o comentário desta rodada e
-          # nunca um de run anterior (que já estaria anotado).
-          # gh api não tem --arg (é flag do jq) — filtro via pipe. --paginate:
-          # o endpoint ordena ascendente e o comentário desta rodada é o mais
-          # novo; sem paginação ele ficaria fora da página 1 em PR com >100.
-          # shellcheck disable=SC2016  # $since é variável jq (--arg), não shell
+          # Use the same valid-summary parser as the BLOCKING gate. Paginate
+          # so a current review after comment 100 is still visible.
           cid="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
-            | jq -sr --arg since "$SINCE" 'add | [.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")) and (.created_at >= $since))] | last | .id // empty')" || true
+            | jq -s add | PYTHONPATH=.gh-agents/scripts python3 -c '
+          import json, os, sys
+          from datetime import datetime
+          from review_blocking import latest_review
+          review = latest_review(json.load(sys.stdin) or [], datetime.fromisoformat(os.environ["SINCE"]))
+          print((review or {}).get("id", ""))
+          ')" || true
           [ -n "$cid" ] || { echo "no review comment found to annotate"; exit 0; }
           IFS='|' read -r model tok cost <<<"$meta"
           mins=$(( dur / 60 )); secs=$(( dur % 60 ))
@@ -357,9 +382,10 @@ jobs:
             echo "no BLOCKING on PR #${PR}"
             exit 0
           fi
+          block_text="$(jq -r .block <<<"$out" | sed 's/^/    /')"
           # shellcheck disable=SC2016 # backticks in the format string are literal markdown
-          body="$(printf 'Automatic review of PR #%s (SHA `%s`) ended with %s BLOCKING.\n\n- Comment: %s\n\n```\nBLOCKING\n%s\n```\n\nTriage: `/oc <request>` here, or close if not pertinent.\n' \
-            "$PR" "$SHA" "$blocking" "$(jq -r .url <<<"$out")" "$(jq -r .block <<<"$out")")"
+          body="$(printf 'Automatic review of PR #%s (SHA `%s`) ended with %s BLOCKING.\n\nComment: %s\n\n    BLOCKING\n%s\n\nTriage: `/oc <request>` on PR #%s, or close if not pertinent.\n' \
+            "$PR" "$SHA" "$blocking" "$(jq -r .url <<<"$out")" "$block_text" "$PR")"
           # workflows that use a label guarantee the label
           gh label create review-blocking --color B60205 \
             --description "Automatic review reported BLOCKING" --force >/dev/null
@@ -380,10 +406,11 @@ jobs:
 
   fix:
     name: Fix (/oc)
-    # Comments are untrusted input: only OWNER/MEMBER/COLLABORATOR, never a bot
-    # (a bot triggering the fixer would be a bot-triggered bot).
+    # Comments are untrusted input: only PR comments from
+    # OWNER/MEMBER/COLLABORATOR, never a bot (a bot must not trigger a bot).
     if: >-
       (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
+      && (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
       && github.event.comment.user.type != 'Bot'
       && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
@@ -395,6 +422,30 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      - name: Check PR is still open
+        id: pr-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          state=""
+          for attempt in 1 2; do
+            if state="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"; then
+              break
+            fi
+            state=""
+            [ "$attempt" -eq 2 ] || sleep 2
+          done
+          case "$state" in
+            OPEN) echo "PR #${PR} is OPEN" ;;
+            MERGED|CLOSED)
+              echo "::error title=PR #${PR} ${state}::Fix cannot run because PR #${PR} is ${state}."
+              exit 1 ;;
+            *)
+              echo "::error title=PR state unavailable::Could not determine the state of PR #${PR}."
+              exit 1 ;;
+          esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -527,8 +578,8 @@ jobs:
 
   ci-doctor:
     name: CI doctor
-    # failed workflow_run; empty ci_workflows watches all (regra: diagnose-only,
-    # never fix — fixing is /oc or human).
+    # Failed workflow_run; empty ci_workflows watches all runs the caller's
+    # workflow_run trigger woke (diagnose-only; fixing is /oc or human).
     if: >-
       github.event_name == 'workflow_run'
       && github.event.workflow_run.conclusion == 'failure'

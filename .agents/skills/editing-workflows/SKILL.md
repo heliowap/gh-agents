@@ -19,7 +19,8 @@ checklist for changing it.
       `contents:read, pull-requests:write, issues:write`; fix → adds
       `contents:write`; ci-doctor → `actions:read` instead of write.
 - [ ] Every job has `timeout-minutes` and a `concurrency` group keyed by
-      `event_name` + PR/issue number — a comment must never cancel an
+      `event_name` + PR/issue number (`workflow_run.id` for CI events,
+      `github.run_id` when no target exists). A comment must never cancel an
       in-flight review (intrador #1417).
 - [ ] `runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}` — never a
       hardcoded label. The switch stays a switch.

@@ -11,10 +11,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = ROOT / ".github/workflows/agents.yml"
+WORKFLOW = Path(os.environ.get("GH_AGENTS_WORKFLOW_UNDER_TEST", ROOT / ".github/workflows/agents.yml"))
 
 
 def _step(job: str, step_id: str) -> str:
@@ -94,6 +95,53 @@ def test_gate_fails_open_when_the_lookup_fails(tmp_path: Path) -> None:
     assert "reviewable=true" in output
 
 
+# --- PR state before checkout (#28) -------------------------------------------
+
+def _pr_state(tmp_path: Path, job: str, responses: list[str]):
+    fake = (
+        "responses = json.loads(os.environ['GH_RESPONSES'])\n"
+        "call_number = len(open(os.environ['GH_CALLS']).read().splitlines())\n"
+        "state = responses[call_number - 1]\n"
+        "if state == 'ERROR': sys.exit(1)\n"
+        "print(state)\n"
+    )
+    env = _fake_gh(tmp_path, fake) | {"PR": "23", "GH_RESPONSES": json.dumps(responses)}
+    # The workflow waits between API attempts; the test only needs to observe
+    # that it makes the second call.
+    sleep = tmp_path / "bin" / "sleep"
+    sleep.write_text("#!/bin/sh\nexit 0\n")
+    sleep.chmod(0o755)
+    steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
+    assert steps[0]["id"] == "pr-state"
+    return _run(tmp_path, _step(job, "pr-state"), env, tmp_path)
+
+
+@pytest.mark.parametrize("job", ["review", "fix"])
+@pytest.mark.parametrize("state,expected_rc", [("OPEN", 0), ("MERGED", 1), ("CLOSED", 1)])
+def test_pr_state_is_reported_before_checkout(tmp_path: Path, job: str, state: str, expected_rc: int) -> None:
+    proc, calls, _ = _pr_state(tmp_path, job, [state])
+    assert proc.returncode == expected_rc, proc.stdout + proc.stderr
+    assert f"PR #23 is {state}" in proc.stdout
+    assert ("::error" in proc.stdout) == (state != "OPEN")
+    assert calls == [["pr", "view", "23", "--repo", "example/repo", "--json", "state", "--jq", ".state"]]
+
+
+@pytest.mark.parametrize("job", ["review", "fix"])
+def test_pr_state_retries_api_failure_once(tmp_path: Path, job: str) -> None:
+    proc, calls, _ = _pr_state(tmp_path, job, ["ERROR", "OPEN"])
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "PR #23 is OPEN" in proc.stdout
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("job", ["review", "fix"])
+def test_pr_state_fails_when_both_api_attempts_fail(tmp_path: Path, job: str) -> None:
+    proc, calls, _ = _pr_state(tmp_path, job, ["ERROR", "ERROR"])
+    assert proc.returncode == 1
+    assert "Could not determine the state of PR #23" in proc.stdout
+    assert len(calls) == 2
+
+
 # --- BLOCKING -> review-blocking issue (#20) ----------------------------------
 
 BLOCKING_REVIEW = "BLOCKING\n- a.py:1 breaks the build\n\nWARNING\n  (none)\n\nSUMMARY: 1 BLOCKING, 0 WARNING, 0 NIT"
@@ -145,6 +193,17 @@ def test_blocking_in_this_run_opens_an_issue_with_the_block(tmp_path: Path) -> N
     assert "PR #1609 " in created[created.index("--title") + 1]
 
 
+def test_blocking_issue_keeps_fenced_examples_inside_the_report(tmp_path: Path) -> None:
+    review = "BLOCKING\n- a.py:1 replace with:\n```py\nvalue = 1\n```\n\nSUMMARY: 1 BLOCKING, 0 WARNING, 0 NIT"
+    comments = [_comment(review, "2026-09-13T20:43:14Z", "https://example/current")]
+    proc, calls, _ = _blocking(tmp_path, comments, [], since="2026-09-13T20:30:00Z")
+    assert proc.returncode == 0, proc.stderr
+    created = next(c for c in calls if c[:2] == ["issue", "create"])
+    body = created[created.index("--body") + 1]
+    assert "\n    BLOCKING\n    - a.py:1 replace with:\n    ```py\n    value = 1\n    ```\n" in body
+    assert "Triage: `/oc <request>` on PR #1609" in body
+
+
 def test_blocking_reopens_the_closed_issue_of_the_same_pr(tmp_path: Path) -> None:
     comments = [_comment(BLOCKING_REVIEW, "2026-09-13T20:43:14Z", "https://example/current")]
     issues = [{"number": 7, "title": "review-blocking: PR #1609 with BLOCKING in review", "state": "closed"},
@@ -154,6 +213,40 @@ def test_blocking_reopens_the_closed_issue_of_the_same_pr(tmp_path: Path) -> Non
     assert ["issue", "reopen", "7"] in calls
     assert any(c[:3] == ["issue", "comment", "7"] for c in calls)
     assert not any(c[:2] == ["issue", "create"] for c in calls)
+
+
+def test_usage_footer_selects_the_marked_translated_review(tmp_path: Path) -> None:
+    review_body = "BLOCKING\n  (none)\n\n**RESUMO**: 0 BLOQUEIO, 1 AVISO, 0 NIT"
+    comments = [
+        _comment("SUMMARY: 1 BLOCKING", "2026-09-13T20:02:20Z", "https://example/old") | {"id": 40},
+        _comment(review_body, "2026-09-13T20:43:14Z", "https://example/review") | {"id": 42},
+        _comment("The word SUMMARY: appears in this fix log", "2026-09-13T20:44:00Z", "https://example/fix") | {"id": 43},
+    ]
+    fake = (
+        "comments = json.loads(os.environ['GH_COMMENTS'])\n"
+        "if '--paginate' in args: print(json.dumps(comments))\n"
+        "elif '--jq' in args:\n"
+        "    cid = int(args[1].rsplit('/', 1)[-1])\n"
+        "    print(next(c['body'] for c in comments if c['id'] == cid))\n"
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / ".gh-agents").symlink_to(ROOT)
+    env = _fake_gh(tmp_path, fake) | {
+        "GH_COMMENTS": json.dumps(comments), "PR": "1609", "STARTED": "1",
+        "SINCE": "2026-09-13T20:30:00Z",
+    }
+    opencode = tmp_path / "bin" / "opencode"
+    opencode.write_text("#!/bin/sh\nprintf '[]\\n'\n")
+    opencode.chmod(0o755)
+    steps = yaml.safe_load(WORKFLOW.read_text())["jobs"]["review"]["steps"]
+    script = next(s["run"] for s in steps if s.get("name") == "Annotate review comment with usage")
+    proc, calls, _ = _run(tmp_path, script, env, workspace)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    patches = [c for c in calls if c[:3] == ["api", "-X", "PATCH"]]
+    assert len(patches) == 1
+    assert patches[0][3] == "repos/example/repo/issues/comments/42"
+    assert any(review_body in arg and "<sub>review by" in arg for arg in patches[0])
 
 
 # --- the session ran as the pinned agent (#25) --------------------------------

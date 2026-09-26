@@ -21,7 +21,8 @@ required beyond a secret.
    ```
 
 3. Copy `templates/caller-agents.yml` to `.github/workflows/agents.yml` in the
-   repo and set `on.pull_request.branches` to the repo's default branch.
+   repo. Set `on.pull_request.branches` to the target branch and
+   `on.workflow_run.workflows` to the repo's exact CI workflow names.
 4. Optional: `gh variable set AGENT_RUNNER --repo owner/repo` to pick a
    backend, `CI_RUNNER` for regular CI, or the repo's own `opencode.json` /
    `.agents/skills/` to override the defaults here.
@@ -53,7 +54,7 @@ another org or account maps it explicitly, or the key arrives empty:
 | `use_container` | `true` | Run jobs in the runtime image; `false` runs on the host. |
 | `runtime_image` | `ghcr.io/heliowap/gh-agents-runtime:v1` | Job image when `use_container` is true. |
 | `gh_agents_ref` | `v1` | Ref of this repo used for default agents/skills/scripts. |
-| `ci_workflows` | empty = all | Comma-separated workflow names ci-doctor watches. |
+| `ci_workflows` | empty = all | Comma-separated workflow names ci-doctor watches — it only narrows what the caller's `on.workflow_run.workflows` list already woke; watch-all needs every CI workflow named there. |
 
 Secrets (arrive via `secrets: inherit` or explicit mapping): the preflight
 requires the key matching the `model` provider — `OPENCODE_API_KEY` for
@@ -99,11 +100,11 @@ A label with no matching runner leaves the job queued forever — check
   review, with a notice, when the actor that triggered it has only `read` or
   no permission on the repo (typically a bot pushing to the PR); re-running
   the workflow as a maintainer reviews it.
-- **fix** — on comments containing `/oc` or `/opencode`, only from
+- **fix** — on PR comments containing `/oc` or `/opencode`, only from
   OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
   coarse pre-filter (`/ocaml` can queue a wasted run, never a wrong edit); the
-  action's own mention parsing is the real gate. On a PR it commits to the PR
-  branch; on an issue it opens a branch and a PR.
+  action's own mention parsing is the real gate. It commits to the PR branch;
+  commands on ordinary issues do not run.
 - **ci-doctor** — on `workflow_run` completed with `failure`: finds the
   associated PR, posts one diagnosis (probable cause, log evidence, suggested
   fix) ending in `<!-- ci-doctor:<sha> -->`, which is also the dedup key — one

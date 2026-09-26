@@ -6,7 +6,9 @@
   trigger lane plus the PR/issue number. Caller jobs put both `/oc` comment
   event types in the `fix` lane; other events use `event_name`. Use
   `workflow_run.id` for CI events and `github.run_id` if the payload has no
-  target. A comment must never cancel an in-flight review (intrador #1417).
+  target. The callee uses the same lanes in a separate group namespace so
+  it cannot cancel its caller. A comment must never cancel an in-flight
+  review (intrador #1417).
 - Untrusted values (comment bodies, PR titles, workflow_run fields) reach
   `run:` scripts through `env:`, never through `${{ }}` inside the script.
 - Every `if:` that encodes a rule carries a comment saying which rule, in the

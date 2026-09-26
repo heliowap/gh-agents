@@ -21,8 +21,9 @@ checklist for changing it.
 - [ ] Every job has `timeout-minutes` and a `concurrency` group keyed by
       trigger lane + PR/issue number: caller jobs put both `/oc` comment
       types in `fix`; other events use `event_name` (`workflow_run.id` for CI,
-      `github.run_id` when no target exists). A comment must never cancel an
-      in-flight review (intrador #1417).
+      `github.run_id` when no target exists). The callee group has a separate
+      namespace to avoid cancelling its caller. A comment must never cancel
+      an in-flight review (intrador #1417).
 - [ ] `runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}` — never a
       hardcoded label. The switch stays a switch.
 - [ ] Untrusted values (comment bodies, PR titles, `workflow_run` fields)

@@ -36,8 +36,10 @@ jobs:
   agents:
     uses: ./.github/workflows/agents.yml
     # the callee's top-level concurrency never applies inside a caller run;
-    # group by event + target here so a comment can't race an in-flight
-    # review (intrador #1417)
+    # group by event + target here: with one group per PR, any comment —
+    # another app's included — cancelled the in-flight review (intrador
+    # #1417, run 34868746805). A queued run is replaced by the next arrival,
+    # so a target-only group would let a plain comment drop a pending review.
     concurrency:
       # for workflow_run the id is unique per triggering run — the group
       # never collides there; ci-doctor dedup comes from its marker comment
@@ -54,18 +56,16 @@ jobs:
       model: fireworks-ai/accounts/fireworks/models/glm-5p3-flash
       model_fallbacks: fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash
       ci_workflows: 'lint,build-runtime'
-      # seeds (agents/, skills/, scripts/) from the PR's own branch — callee
-      # and config changes get exercised by the PR that changes them.
-      # pull_request and review_comment payloads carry pull_request.head;
-      # issue_comment on a PR only has issue.pull_request → refs/pull/N/head
-      # (issue.number == PR number — shared sequence), which resolves fork
-      # heads too (/oc is collaborator-gated). workflow_run and /oc on
-      # plain issues fall to 'main'.
+      # seeds (agents/, skills/, scripts/) from the PR's own branch when it
+      # lives in this repo — callee and config changes get exercised by the
+      # PR that changes them. Never a fork head: the fix job copies the seed
+      # opencode.json to the root (this repo has none), and a fork could
+      # declare a local MCP command that runs with the provider keys and a
+      # contents: write token. issue_comment carries no head repo, so
+      # comment-triggered runs, workflow_run and forks all seed from 'main'.
       gh_agents_ref: >-
         ${{
           (github.event.pull_request.head.repo.full_name == github.repository
             && github.event.pull_request.head.ref)
-          || (github.event.issue.pull_request
-            && format('refs/pull/{0}/head', github.event.issue.number))
           || 'main'
         }}

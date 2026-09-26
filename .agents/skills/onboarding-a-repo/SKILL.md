@@ -21,38 +21,14 @@ tag. The repo keeps autonomy — everything below the caller file is optional.
    Private repos only.
 2. Secret: `gh secret set OPENCODE_API_KEY --repo owner/repo -b "$KEY"`
    (or omit `-b` for an interactive prompt).
-3. Caller workflow at `.github/workflows/agents.yml` in the target repo:
-
-```yaml
-name: agents
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-    branches: [<default-branch>]   # caller's choice — never assumed
-    paths-ignore: ['docs/**', '**/*.md']
-  issue_comment:
-    types: [created]
-  pull_request_review_comment:
-    types: [created]
-  workflow_run:
-    types: [completed]
-    workflows: ['ci']    # required key — list the CI workflows to watch
-
-permissions:
-  contents: read
-
-jobs:
-  agents:
-    # The caller job's permissions are the CEILING for the called workflow's
-    # GITHUB_TOKEN — grant the union of what review/fix/ci-doctor need.
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      actions: read
-    uses: heliowap/gh-agents/.github/workflows/agents.yml@v1
-    secrets: inherit
-```
+3. Copy this repo's `templates/caller-agents.yml` to the target repo's
+   `.github/workflows/agents.yml`. Keep its caller-side comment gate and
+   concurrency group: without them, unrelated comments can cancel a fixer or
+   an in-flight review. Set `pull_request.branches` to the target branch and
+   `workflow_run.workflows` to the exact CI workflow names. The caller job's
+   permissions are the ceiling for the reusable workflow's token; keep the
+   template's `actions: read`, `contents: write`, `pull-requests: write`, and
+   `issues: write` grants.
 
    `secrets: inherit` only reaches a reusable workflow of the same owner. A
    repo outside `heliowap` (e.g. an org repo) maps each key explicitly, or the

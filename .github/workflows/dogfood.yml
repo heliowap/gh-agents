@@ -35,6 +35,17 @@ permissions:
 jobs:
   agents:
     uses: ./.github/workflows/agents.yml
+    # Skip untrusted and non-command comments before they enter concurrency;
+    # otherwise even a skipped callee would cancel an active /oc fixer.
+    if: >-
+      github.event_name == 'pull_request'
+      || github.event_name == 'workflow_run'
+      || (
+        (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
+        && github.event.comment.user.type != 'Bot'
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
+      )
     # the callee's top-level concurrency never applies inside a caller run;
     # group by event + target here: with one group per PR, any comment —
     # another app's included — cancelled the in-flight review (intrador
@@ -47,7 +58,9 @@ jobs:
         gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
         || github.event.issue.number || github.event.workflow_run.id
         || github.ref }}
-      cancel-in-progress: true
+      # A newer PR revision supersedes its review. Comments queue; a new
+      # /oc request must not interrupt a fixer already editing the branch.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     secrets:
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}

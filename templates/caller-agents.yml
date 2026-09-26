@@ -34,6 +34,17 @@ permissions:
 jobs:
   agents:
     uses: heliowap/gh-agents/.github/workflows/agents.yml@v1
+    # Skip untrusted and non-command comments before they enter concurrency;
+    # otherwise even a skipped callee would cancel an active /oc fixer.
+    if: >-
+      github.event_name == 'pull_request'
+      || github.event_name == 'workflow_run'
+      || (
+        (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
+        && github.event.comment.user.type != 'Bot'
+        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+        && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
+      )
     # the callee's top-level concurrency never applies inside a caller run;
     # group by event + target here so a comment never cancels an in-flight
     # review — one group per PR let any comment kill it (intrador #1417).
@@ -44,7 +55,9 @@ jobs:
         gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
         || github.event.issue.number || github.event.workflow_run.id
         || github.ref }}
-      cancel-in-progress: true
+      # A newer PR revision supersedes its review. Comments queue; a new
+      # /oc request must not interrupt a fixer already editing the branch.
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     # `inherit` only passes secrets to a reusable workflow of the same owner
     # (org or enterprise). Repos outside `heliowap` map them explicitly — with
     # `inherit` the key arrives empty and the preflight fails:

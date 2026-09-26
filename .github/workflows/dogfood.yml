@@ -7,20 +7,21 @@ name: agents
 #
 # runs-on: ubuntu-latest by choice — the repo is public; self-hosted
 # runners serve private repos only (AGENTS.md invariant 3).
+# No paths-ignore: specs/conventions are the product surface here —
+# doc-only PRs get reviewed too.
 
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    workflows: ['*']   # narrowed by the ci_workflows input
+    # exact workflow names — this filter takes no globs ('*' never matches),
+    # and `agents` itself stays out so a finished run can't retrigger itself
+    workflows: ['lint', 'build-runtime']
     types: [completed]
 
 # The reusable callee can only use what is granted here — this is the union
@@ -34,18 +35,30 @@ permissions:
 jobs:
   agents:
     uses: ./.github/workflows/agents.yml
+    # the callee's top-level concurrency never applies inside a caller run;
+    # group by event + target here so a comment can't race an in-flight
+    # review (intrador #1417)
+    concurrency:
+      group: >-
+        gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
+        || github.event.issue.number || github.event.workflow_run.id
+        || github.ref }}
+      cancel-in-progress: true
     secrets:
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
     with:
       runs-on: ubuntu-latest
       model: fireworks-ai/accounts/fireworks/models/glm-5p3-flash
       model_fallbacks: fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash
       ci_workflows: 'lint,build-runtime'
-      # Seed files (agents/, skills/, scripts/) come from the PR's branch when
-      # it lives in this repo — callee changes get exercised by their own PR.
-      # Fork PRs fall back to main: their head_ref does not exist here.
+      # seeds (agents/, skills/, scripts/) from the PR's own branch — callee
+      # and config changes get exercised by the PR that changes them.
+      # pull_request and review_comment payloads carry pull_request.head;
+      # issue_comment and workflow_run do not → 'main'. Fork PRs also get
+      # 'main': their head ref does not exist in this repo.
       gh_agents_ref: >-
         ${{
           github.event.pull_request.head.repo.full_name == github.repository
-          && github.head_ref || 'main'
+          && github.event.pull_request.head.ref || 'main'
         }}

@@ -57,7 +57,7 @@ permissions:
 # One run per (event, target): comments get their own group so a comment never
 # cancels an in-flight review (intrador #1417).
 concurrency:
-  group: gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.ref }}
+  group: gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -334,15 +334,16 @@ jobs:
           fi
           now="$(date +%s)"
           dur=$(( now - STARTED ))
-          # O endpoint ignora sort/direction — vem em ordem crescente; `last`
-          # + corte `created_at >= SINCE` pegam o comentário desta rodada e
-          # nunca um de run anterior (que já estaria anotado).
-          # gh api não tem --arg (é flag do jq) — filtro via pipe. --paginate:
-          # o endpoint ordena ascendente e o comentário desta rodada é o mais
-          # novo; sem paginação ele ficaria fora da página 1 em PR com >100.
-          # shellcheck disable=SC2016  # $since é variável jq (--arg), não shell
+          # Use the same valid-summary parser as the BLOCKING gate. Paginate
+          # so a current review after comment 100 is still visible.
           cid="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
-            | jq -sr --arg since "$SINCE" 'add | [.[] | select(.user.login=="github-actions[bot]" and (.body | test("SUMMARY:|RESUMO:|SUMÁRIO:")) and (.created_at >= $since))] | last | .id // empty')" || true
+            | jq -s add | PYTHONPATH=.gh-agents/scripts python3 -c '
+          import json, os, sys
+          from datetime import datetime
+          from review_blocking import latest_review
+          review = latest_review(json.load(sys.stdin) or [], datetime.fromisoformat(os.environ["SINCE"]))
+          print((review or {}).get("id", ""))
+          ')" || true
           [ -n "$cid" ] || { echo "no review comment found to annotate"; exit 0; }
           IFS='|' read -r model tok cost <<<"$meta"
           mins=$(( dur / 60 )); secs=$(( dur % 60 ))

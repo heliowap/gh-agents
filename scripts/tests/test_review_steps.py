@@ -215,6 +215,40 @@ def test_blocking_reopens_the_closed_issue_of_the_same_pr(tmp_path: Path) -> Non
     assert not any(c[:2] == ["issue", "create"] for c in calls)
 
 
+def test_usage_footer_selects_the_marked_translated_review(tmp_path: Path) -> None:
+    review_body = "BLOCKING\n  (none)\n\n**RESUMO**: 0 BLOQUEIO, 1 AVISO, 0 NIT"
+    comments = [
+        _comment("SUMMARY: 1 BLOCKING", "2026-09-13T20:02:20Z", "https://example/old") | {"id": 40},
+        _comment(review_body, "2026-09-13T20:43:14Z", "https://example/review") | {"id": 42},
+        _comment("The word SUMMARY: appears in this fix log", "2026-09-13T20:44:00Z", "https://example/fix") | {"id": 43},
+    ]
+    fake = (
+        "comments = json.loads(os.environ['GH_COMMENTS'])\n"
+        "if '--paginate' in args: print(json.dumps(comments))\n"
+        "elif '--jq' in args:\n"
+        "    cid = int(args[1].rsplit('/', 1)[-1])\n"
+        "    print(next(c['body'] for c in comments if c['id'] == cid))\n"
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / ".gh-agents").symlink_to(ROOT)
+    env = _fake_gh(tmp_path, fake) | {
+        "GH_COMMENTS": json.dumps(comments), "PR": "1609", "STARTED": "1",
+        "SINCE": "2026-09-13T20:30:00Z",
+    }
+    opencode = tmp_path / "bin" / "opencode"
+    opencode.write_text("#!/bin/sh\nprintf '[]\\n'\n")
+    opencode.chmod(0o755)
+    steps = yaml.safe_load(WORKFLOW.read_text())["jobs"]["review"]["steps"]
+    script = next(s["run"] for s in steps if s.get("name") == "Annotate review comment with usage")
+    proc, calls, _ = _run(tmp_path, script, env, workspace)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    patches = [c for c in calls if c[:3] == ["api", "-X", "PATCH"]]
+    assert len(patches) == 1
+    assert patches[0][3] == "repos/example/repo/issues/comments/42"
+    assert any(review_body in arg and "<sub>review by" in arg for arg in patches[0])
+
+
 # --- the session ran as the pinned agent (#25) --------------------------------
 
 def _agent_check(tmp_path: Path, job: str, sessions: list[dict], agents_by_session: dict):

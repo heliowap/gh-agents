@@ -16,7 +16,9 @@ on:
   pull_request_review_comment:
     types: [created]
   workflow_run:
-    workflows: ['*']   # narrow via the ci_workflows input instead of editing this
+    # exact workflow names — this filter takes no globs ('*' never matches);
+    # keep it in sync with ci_workflows and leave this workflow's own name out
+    workflows: ['ci']
     types: [completed]
 
 # The reusable callee can only use what is granted here — this is the union
@@ -30,6 +32,14 @@ permissions:
 jobs:
   agents:
     uses: heliowap/gh-agents/.github/workflows/agents.yml@v1
+    # the callee's top-level concurrency never applies inside a caller run;
+    # group by event + target here so a comment can't race an in-flight review
+    concurrency:
+      group: >-
+        gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
+        || github.event.issue.number || github.event.workflow_run.id
+        || github.ref }}
+      cancel-in-progress: true
     # `inherit` only passes secrets to a reusable workflow of the same owner
     # (org or enterprise). Repos outside `heliowap` map them explicitly — with
     # `inherit` the key arrives empty and the preflight fails:

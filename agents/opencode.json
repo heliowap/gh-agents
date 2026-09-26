@@ -62,7 +62,6 @@
           "*": "deny",
           "gh run view*": "allow",
           "gh run list*": "allow",
-          "gh api*": "allow",
           "gh pr view*": "allow",
           "gh pr comment*": "allow",
           "git log*": "allow",

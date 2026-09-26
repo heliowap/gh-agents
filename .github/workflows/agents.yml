@@ -58,7 +58,10 @@ permissions:
 # concurrency applies to a called workflow, both /oc comment events share a
 # fix lane and never interrupt an active fixer; reviews have their own lane.
 concurrency:
-  group: gh-agents-callee-${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && 'fix' || github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.id || github.run_id }}
+  group: >-
+    gh-agents-callee-${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && 'fix' || github.event_name }}-${{ github.event.pull_request.number
+    || github.event.issue.number || github.event.workflow_run.id
+    || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

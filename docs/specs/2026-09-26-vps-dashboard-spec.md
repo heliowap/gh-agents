@@ -27,15 +27,17 @@ escopo excessivo e prende a operação a uma conta pessoal.
   - `variables`: read/write — `PATCH
     /repos/{owner}/{repo}/actions/variables/{CI_RUNNER,AGENT_RUNNER}` (o
     switch do painel). Permissão própria — `administration` **não** cobre
-    `actions/variables`. Chave no manifesto: `actions_variables`; docs
-    recentes exibem como "Agent variables" (`agent_variables`), renomeação
-    em curso — se uma for recusada, usar a outra.
+    `actions/variables`. Chave no manifesto: `actions_variables`.
+    **Não confundir** com `agent_variables`: permissão separada da
+    família `/agents/variables` (variáveis de coding agent) — não é
+    rename e não cobre o switch.
   - `metadata`: read (implícita).
 - **Organization permissions**: `self-hosted runners`: read/write —
-  `enable-org` futuro; `organization_agent_variables`: read/write —
-  variáveis de org, se o painel precisar. O switch em repo de org usa a
-  permissão `variables` de repo, via instalação na org (`intrador`,
-  `All-Medical`).
+  `enable-org` futuro; `organization_actions_variables`: read/write —
+  variáveis de org em `/orgs/{org}/actions/variables`, se o painel
+  precisar (`organization_agent_variables` cobre `/agents/variables`,
+  outra família). O switch em repo de org usa a permissão `variables`
+  de repo, via instalação na org (`intrador`, `All-Medical`).
 - **Sem** `contents`, sem `issues` — o painel não lê código nem posta.
 - **Instalação**: conta `heliowap` (todos os repos) + org `intrador` +
   org `All-Medical` — instalação por org só quando #7 (enable orgs) sair

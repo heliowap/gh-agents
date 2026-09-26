@@ -35,8 +35,8 @@ permissions:
 jobs:
   agents:
     uses: ./.github/workflows/agents.yml
-    # Only trusted PR commands enter concurrency; an /oc on a plain issue
-    # must never run the fixer against the default branch.
+    # Only trusted PR commands enter concurrency. Otherwise an unrelated
+    # comment can replace a pending /oc request; plain issues never run fix.
     if: >-
       github.event_name == 'pull_request'
       || github.event_name == 'workflow_run'
@@ -54,11 +54,12 @@ jobs:
     # so a target-only group would let a plain comment drop a pending review.
     concurrency:
       # for workflow_run the id is unique per triggering run — the group
-      # never collides there; ci-doctor dedup comes from its marker comment
+      # never collides there; ci-doctor dedup comes from its marker comment.
+      # Every declared event has a target; run_id isolates malformed payloads.
       group: >-
         gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
         || github.event.issue.number || github.event.workflow_run.id
-        || github.ref }}
+        || github.run_id }}
       # A newer PR revision supersedes its review. Comments queue; a new
       # /oc request must not interrupt a fixer already editing the branch.
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}

@@ -21,7 +21,8 @@ required beyond a secret.
    ```
 
 3. Copy `templates/caller-agents.yml` to `.github/workflows/agents.yml` in the
-   repo and set `on.pull_request.branches` to the repo's default branch.
+   repo. Set `on.pull_request.branches` to the target branch and
+   `on.workflow_run.workflows` to the repo's exact CI workflow names.
 4. Optional: `gh variable set AGENT_RUNNER --repo owner/repo` to pick a
    backend, `CI_RUNNER` for regular CI, or the repo's own `opencode.json` /
    `.agents/skills/` to override the defaults here.

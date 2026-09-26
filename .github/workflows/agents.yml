@@ -576,8 +576,8 @@ jobs:
 
   ci-doctor:
     name: CI doctor
-    # failed workflow_run; empty ci_workflows watches all (regra: diagnose-only,
-    # never fix — fixing is /oc or human).
+    # Failed workflow_run; empty ci_workflows watches all runs the caller's
+    # workflow_run trigger woke (diagnose-only; fixing is /oc or human).
     if: >-
       github.event_name == 'workflow_run'
       && github.event.workflow_run.conclusion == 'failure'

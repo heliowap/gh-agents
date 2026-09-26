@@ -7,8 +7,8 @@ description: Use when enabling gh-agents on a repository — adding the caller w
 
 ## Overview
 
-Enabling a repo means: runners cover it, the secret exists, and a ~20-line
-caller workflow pins `heliowap/gh-agents/.github/workflows/agents.yml` by
+Enabling a repo means: runners cover it, the secret exists, and a caller
+workflow pins `heliowap/gh-agents/.github/workflows/agents.yml` by
 tag. The repo keeps autonomy — everything below the caller file is optional.
 
 ## Checklist

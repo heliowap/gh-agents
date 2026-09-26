@@ -34,8 +34,8 @@ permissions:
 jobs:
   agents:
     uses: heliowap/gh-agents/.github/workflows/agents.yml@v1
-    # Only trusted PR commands enter concurrency; an /oc on a plain issue
-    # must never run the fixer against the default branch.
+    # Only trusted PR commands enter concurrency. Otherwise an unrelated
+    # comment can replace a pending /oc request; plain issues never run fix.
     if: >-
       github.event_name == 'pull_request'
       || github.event_name == 'workflow_run'
@@ -50,12 +50,13 @@ jobs:
     # group by event + target here so a comment never cancels an in-flight
     # review — one group per PR let any comment kill it (intrador #1417).
     # for workflow_run the id is unique per triggering run — the group never
-    # collides there; ci-doctor dedup comes from its marker comment
+    # collides there; ci-doctor dedup comes from its marker comment.
+    # Every declared event has a target; run_id isolates malformed payloads.
     concurrency:
       group: >-
         gh-agents-${{ github.event_name }}-${{ github.event.pull_request.number
         || github.event.issue.number || github.event.workflow_run.id
-        || github.ref }}
+        || github.run_id }}
       # A newer PR revision supersedes its review. Comments queue; a new
       # /oc request must not interrupt a fixer already editing the branch.
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}

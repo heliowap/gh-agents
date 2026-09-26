@@ -342,7 +342,7 @@ jobs:
           # novo; sem paginação ele ficaria fora da página 1 em PR com >100.
           # shellcheck disable=SC2016  # $since é variável jq (--arg), não shell
           cid="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments?per_page=100" \
-            | jq -sr --arg since "$SINCE" 'add | [.[] | select(.user.login=="github-actions[bot]" and (.body | contains("SUMMARY:")) and (.created_at >= $since))] | last | .id // empty')" || true
+            | jq -sr --arg since "$SINCE" 'add | [.[] | select(.user.login=="github-actions[bot]" and (.body | test("SUMMARY:|RESUMO:|SUMÁRIO:")) and (.created_at >= $since))] | last | .id // empty')" || true
           [ -n "$cid" ] || { echo "no review comment found to annotate"; exit 0; }
           IFS='|' read -r model tok cost <<<"$meta"
           mins=$(( dur / 60 )); secs=$(( dur % 60 ))
@@ -381,9 +381,10 @@ jobs:
             echo "no BLOCKING on PR #${PR}"
             exit 0
           fi
+          block_text="$(jq -r .block <<<"$out" | sed 's/^/    /')"
           # shellcheck disable=SC2016 # backticks in the format string are literal markdown
-          body="$(printf 'Automatic review of PR #%s (SHA `%s`) ended with %s BLOCKING.\n\n- Comment: %s\n\n```\nBLOCKING\n%s\n```\n\nTriage: `/oc <request>` here, or close if not pertinent.\n' \
-            "$PR" "$SHA" "$blocking" "$(jq -r .url <<<"$out")" "$(jq -r .block <<<"$out")")"
+          body="$(printf 'Automatic review of PR #%s (SHA `%s`) ended with %s BLOCKING.\n\nComment: %s\n\n    BLOCKING\n%s\n\nTriage: `/oc <request>` on PR #%s, or close if not pertinent.\n' \
+            "$PR" "$SHA" "$blocking" "$(jq -r .url <<<"$out")" "$block_text" "$PR")"
           # workflows that use a label guarantee the label
           gh label create review-blocking --color B60205 \
             --description "Automatic review reported BLOCKING" --force >/dev/null

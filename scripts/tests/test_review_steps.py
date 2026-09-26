@@ -193,6 +193,17 @@ def test_blocking_in_this_run_opens_an_issue_with_the_block(tmp_path: Path) -> N
     assert "PR #1609 " in created[created.index("--title") + 1]
 
 
+def test_blocking_issue_keeps_fenced_examples_inside_the_report(tmp_path: Path) -> None:
+    review = "BLOCKING\n- a.py:1 replace with:\n```py\nvalue = 1\n```\n\nSUMMARY: 1 BLOCKING, 0 WARNING, 0 NIT"
+    comments = [_comment(review, "2026-09-13T20:43:14Z", "https://example/current")]
+    proc, calls, _ = _blocking(tmp_path, comments, [], since="2026-09-13T20:30:00Z")
+    assert proc.returncode == 0, proc.stderr
+    created = next(c for c in calls if c[:2] == ["issue", "create"])
+    body = created[created.index("--body") + 1]
+    assert "\n    BLOCKING\n    - a.py:1 replace with:\n    ```py\n    value = 1\n    ```\n" in body
+    assert "Triage: `/oc <request>` on PR #1609" in body
+
+
 def test_blocking_reopens_the_closed_issue_of_the_same_pr(tmp_path: Path) -> None:
     comments = [_comment(BLOCKING_REVIEW, "2026-09-13T20:43:14Z", "https://example/current")]
     issues = [{"number": 7, "title": "review-blocking: PR #1609 with BLOCKING in review", "state": "closed"},

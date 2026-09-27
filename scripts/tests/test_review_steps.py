@@ -372,11 +372,33 @@ def _resolve(tmp_path: Path, job: str, model: str) -> tuple[subprocess.Completed
     # a fake opencode that answers every probe: the step only parses the id
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "opencode").write_text("#!/bin/sh\necho ok\n")
+    # opencode v1 (what CI runs) rejects `#variant` in --model: it takes --variant
+    (bin_dir / "opencode").write_text(
+        "#!/bin/sh\n"
+        "echo \"$*\" >> \"$OPENCODE_CALLS\"\n"
+        "case \"$*\" in *'#'*) exit 1 ;; esac\n"
+        "echo ok\n")
     (bin_dir / "opencode").chmod(0o755)
-    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "MODEL": model, "FALLBACKS": ""}
+    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "MODEL": model, "FALLBACKS": "",
+           "OPENCODE_CALLS": str(tmp_path / "opencode_calls")}
     proc, _, output = _run(tmp_path, _step(job, "model"), env, tmp_path)
     return proc, output
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_probe_passes_the_variant_as_a_flag(tmp_path: Path, job: str) -> None:
+    proc, _ = _resolve(tmp_path, job, "openai/gpt-6-luna-fast#xhigh")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    call = (tmp_path / "opencode_calls").read_text()
+    assert "--model openai/gpt-6-luna-fast --variant xhigh" in call
+
+
+def test_ci_doctor_runs_the_model_and_variant_apart() -> None:
+    step = next(s for s in yaml.safe_load(WORKFLOW.read_text())["jobs"]["ci-doctor"]["steps"]
+                if s.get("name") == "Diagnose failed run")
+    assert step["env"]["MODEL"] == "${{ steps.model.outputs.base }}"
+    assert step["env"]["VARIANT"] == "${{ steps.model.outputs.variant }}"
+    assert '${VARIANT:+--variant "$VARIANT"}' in step["run"]
 
 
 @pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])

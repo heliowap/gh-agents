@@ -239,13 +239,15 @@ jobs:
           for m in "${candidates[@]}"; do
             m="${m//[[:space:]]/}"
             [ -z "$m" ] && continue
+            # `provider/model#variant`: opencode v1 (what the action installs)
+            # takes the reasoning effort as --variant, never inside --model
+            base="${m%%#*}"; variant=""
+            [[ "$m" != *"#"* ]] || variant="${m#*#}"
             echo "probing $m"
-            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+            if (cd "$probe" && timeout 120 opencode run --model "$base" ${variant:+--variant "$variant"} 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
-              # `provider/model#variant`: opencode run takes it whole; the
-              # opencode action wants the model and its `variant` input apart
-              echo "base=${m%%#*}" >> "$GITHUB_OUTPUT"
-              [[ "$m" != *"#"* ]] || echo "variant=${m#*#}" >> "$GITHUB_OUTPUT"
+              echo "base=$base" >> "$GITHUB_OUTPUT"
+              [ -z "$variant" ] || echo "variant=$variant" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -558,13 +560,15 @@ jobs:
           for m in "${candidates[@]}"; do
             m="${m//[[:space:]]/}"
             [ -z "$m" ] && continue
+            # `provider/model#variant`: opencode v1 (what the action installs)
+            # takes the reasoning effort as --variant, never inside --model
+            base="${m%%#*}"; variant=""
+            [[ "$m" != *"#"* ]] || variant="${m#*#}"
             echo "probing $m"
-            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+            if (cd "$probe" && timeout 120 opencode run --model "$base" ${variant:+--variant "$variant"} 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
-              # `provider/model#variant`: opencode run takes it whole; the
-              # opencode action wants the model and its `variant` input apart
-              echo "base=${m%%#*}" >> "$GITHUB_OUTPUT"
-              [[ "$m" != *"#"* ]] || echo "variant=${m#*#}" >> "$GITHUB_OUTPUT"
+              echo "base=$base" >> "$GITHUB_OUTPUT"
+              [ -z "$variant" ] || echo "variant=$variant" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -758,13 +762,15 @@ jobs:
           for m in "${candidates[@]}"; do
             m="${m//[[:space:]]/}"
             [ -z "$m" ] && continue
+            # `provider/model#variant`: opencode v1 (what the action installs)
+            # takes the reasoning effort as --variant, never inside --model
+            base="${m%%#*}"; variant=""
+            [[ "$m" != *"#"* ]] || variant="${m#*#}"
             echo "probing $m"
-            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+            if (cd "$probe" && timeout 120 opencode run --model "$base" ${variant:+--variant "$variant"} 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
-              # `provider/model#variant`: opencode run takes it whole; the
-              # opencode action wants the model and its `variant` input apart
-              echo "base=${m%%#*}" >> "$GITHUB_OUTPUT"
-              [[ "$m" != *"#"* ]] || echo "variant=${m#*#}" >> "$GITHUB_OUTPUT"
+              echo "base=$base" >> "$GITHUB_OUTPUT"
+              [ -z "$variant" ] || echo "variant=$variant" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -778,7 +784,8 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          MODEL: ${{ steps.model.outputs.model }}
+          MODEL: ${{ steps.model.outputs.base }}
+          VARIANT: ${{ steps.model.outputs.variant }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
@@ -793,7 +800,7 @@ jobs:
           # failed run's logs so they don't become annotations on THIS run.
           # Unanchored: agent output may prepend ANSI escapes, and the runner
           # strips them before command parsing.
-          opencode run --model "$MODEL" --agent ci-doctor "$prompt" 2>&1 \
+          opencode run --model "$MODEL" ${VARIANT:+--variant "$VARIANT"} --agent ci-doctor "$prompt" 2>&1 \
             | sed -e 's/##\[/## [/g' \
                   -e 's/::\(add-mask\|debug\|error\|warning\|notice\|group\|endgroup\|echo\|stop-commands\)::/:: \1::/g'
       - name: Save refreshed ChatGPT login

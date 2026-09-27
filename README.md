@@ -52,7 +52,7 @@ another org or account maps it explicitly, or the key arrives empty:
 | Input | Default | Meaning |
 |---|---|---|
 | `runs-on` | `self-hosted` | Runner label fallback; the repo's `vars.AGENT_RUNNER` wins. |
-| `model` | `opencode-go/glm-5.3-flash` | OpenCode model for all agents. |
+| `model` | `opencode-go/glm-5.3-flash` | OpenCode model for all agents: `provider/model`, or `provider/model#variant` to set the reasoning effort (`openai/gpt-6-luna#xhigh`). |
 | `model_fallbacks` | empty | Comma-separated `provider/model` fallbacks; every candidate is live-probed and the first that answers is used. |
 | `use_container` | `true` | Run jobs in the runtime image; `false` runs on the host. |
 | `runtime_image` | `ghcr.io/heliowap/gh-agents-runtime:v1` | Job image when `use_container` is true. |
@@ -112,7 +112,13 @@ time it is used, so a copy in a secret stops working after the first refresh.
      --body /home/gh-agents/.local/share/opencode/auth.json
    ```
 
-3. Set `model: openai/<model>` in the caller workflow.
+3. Set the model in the caller workflow. `#variant` sets the reasoning effort,
+   and the `-fast` model id is OpenAI's priority tier (fast mode):
+
+   ```yaml
+   with:
+     model: openai/gpt-6-luna-fast#xhigh
+   ```
 
 With the variable set, each agent job mounts the file into the container,
 copies it to where opencode reads it, and writes a refreshed OAuth entry back

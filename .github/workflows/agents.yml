@@ -19,7 +19,7 @@ on:
         type: string
         default: "self-hosted"
       model:
-        description: "OpenCode model for all agents."
+        description: "OpenCode model for all agents, as provider/model or provider/model#variant (reasoning effort, e.g. #xhigh)."
         type: string
         default: "opencode-go/glm-5.3-flash"
       model_fallbacks:
@@ -242,6 +242,10 @@ jobs:
             echo "probing $m"
             if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
+              # `provider/model#variant`: opencode run takes it whole; the
+              # opencode action wants the model and its `variant` input apart
+              echo "base=${m%%#*}" >> "$GITHUB_OUTPUT"
+              [[ "$m" != *"#"* ]] || echo "variant=${m#*#}" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -269,7 +273,8 @@ jobs:
           # subagents the reviewer spawns, which don't inherit its permissions.
           OPENCODE_CONFIG_CONTENT: '{"default_agent":"reviewer","permission":{"edit":"deny"}}'
         with:
-          model: ${{ steps.model.outputs.model }}
+          model: ${{ steps.model.outputs.base }}
+          variant: ${{ steps.model.outputs.variant }}
           agent: reviewer
           use_github_token: true
           share: false
@@ -556,6 +561,10 @@ jobs:
             echo "probing $m"
             if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
+              # `provider/model#variant`: opencode run takes it whole; the
+              # opencode action wants the model and its `variant` input apart
+              echo "base=${m%%#*}" >> "$GITHUB_OUTPUT"
+              [[ "$m" != *"#"* ]] || echo "variant=${m#*#}" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -580,7 +589,8 @@ jobs:
           # caller's opencode.json
           OPENCODE_CONFIG_CONTENT: '{"default_agent":"fixer"}'
         with:
-          model: ${{ steps.model.outputs.model }}
+          model: ${{ steps.model.outputs.base }}
+          variant: ${{ steps.model.outputs.variant }}
           agent: fixer
           use_github_token: true
           share: false
@@ -751,6 +761,10 @@ jobs:
             echo "probing $m"
             if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
+              # `provider/model#variant`: opencode run takes it whole; the
+              # opencode action wants the model and its `variant` input apart
+              echo "base=${m%%#*}" >> "$GITHUB_OUTPUT"
+              [[ "$m" != *"#"* ]] || echo "variant=${m#*#}" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi

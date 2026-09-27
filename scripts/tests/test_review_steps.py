@@ -364,3 +364,41 @@ def test_refreshed_login_is_saved_back_to_the_host(tmp_path: Path, job: str) -> 
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert json.loads(host_auth.read_text())["openai"]["refresh"] == "r2"
+
+
+# --- model#variant (reasoning effort) -----------------------------------------
+
+def _resolve(tmp_path: Path, job: str, model: str) -> tuple[subprocess.CompletedProcess, str]:
+    # a fake opencode that answers every probe: the step only parses the id
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "opencode").write_text("#!/bin/sh\necho ok\n")
+    (bin_dir / "opencode").chmod(0o755)
+    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "MODEL": model, "FALLBACKS": ""}
+    proc, _, output = _run(tmp_path, _step(job, "model"), env, tmp_path)
+    return proc, output
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_model_variant_is_split_for_the_opencode_action(tmp_path: Path, job: str) -> None:
+    proc, output = _resolve(tmp_path, job, "openai/gpt-6-luna-fast#xhigh")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "model=openai/gpt-6-luna-fast#xhigh\n" in output
+    assert "base=openai/gpt-6-luna-fast\n" in output
+    assert "variant=xhigh\n" in output
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_model_without_variant_passes_no_variant(tmp_path: Path, job: str) -> None:
+    proc, output = _resolve(tmp_path, job, "opencode-go/glm-5.3-flash")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "base=opencode-go/glm-5.3-flash\n" in output
+    assert "variant=" not in output
+
+
+@pytest.mark.parametrize("job,step_id", [("review", "review"), ("fix", "fix")])
+def test_opencode_action_gets_the_model_and_variant_apart(job: str, step_id: str) -> None:
+    # the action's MODEL must be provider/model; the effort is its `variant` input
+    with_ = _step_def(job, step_id)["with"]
+    assert with_["model"] == "${{ steps.model.outputs.base }}"
+    assert with_["variant"] == "${{ steps.model.outputs.variant }}"

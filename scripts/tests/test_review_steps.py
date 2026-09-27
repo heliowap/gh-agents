@@ -313,3 +313,54 @@ def test_agent_check_without_a_session_warns_instead_of_passing_silently(tmp_pat
     proc, _, _ = _agent_check(tmp_path, "review", [], {})
     assert proc.returncode == 0
     assert "::warning" in proc.stdout
+
+
+# --- ChatGPT login (vars.AGENT_OPENCODE_AUTH) ---------------------------------
+
+def _step_by_name(job: str, name: str) -> str:
+    steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
+    return next(s for s in steps if s.get("name") == name)["run"]
+
+
+def _login_env(tmp_path: Path, host_auth: Path) -> dict:
+    # the job copies .gh-agents/scripts from the gh-agents checkout
+    (tmp_path / ".gh-agents").symlink_to(ROOT)
+    home = tmp_path / "home"
+    home.mkdir()
+    return {"HOME": str(home), "XDG_DATA_HOME": "", "HOST_AUTH": str(host_auth),
+            "OPENCODE_API_KEY": "", "FIREWORKS_API_KEY": ""}
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_openai_model_runs_on_the_loaded_chatgpt_login(tmp_path: Path, job: str) -> None:
+    host_auth = tmp_path / "host-auth.json"
+    host_auth.write_text(json.dumps({"openai": {"type": "oauth", "refresh": "r", "access": "a", "expires": 1}}))
+    env = _login_env(tmp_path, host_auth) | {"MODEL": "openai/gpt-5.5"}
+
+    load, _, _ = _run(tmp_path, _step(job, "auth"), env, tmp_path)
+    assert load.returncode == 0, load.stdout + load.stderr
+    preflight, _, _ = _run(tmp_path, _step(job, "preflight"), env, tmp_path)
+    assert preflight.returncode == 0, preflight.stdout + preflight.stderr
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_openai_model_without_a_login_fails_naming_the_variable(tmp_path: Path, job: str) -> None:
+    env = _login_env(tmp_path, tmp_path / "missing.json") | {"MODEL": "openai/gpt-5.5"}
+    proc, _, _ = _run(tmp_path, _step(job, "preflight"), env, tmp_path)
+    assert proc.returncode == 1
+    assert "AGENT_OPENCODE_AUTH" in proc.stdout
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_refreshed_login_is_saved_back_to_the_host(tmp_path: Path, job: str) -> None:
+    host_auth = tmp_path / "host-auth.json"
+    host_auth.write_text(json.dumps({"openai": {"type": "oauth", "refresh": "r1", "access": "a1", "expires": 1}}))
+    env = _login_env(tmp_path, host_auth)
+    _run(tmp_path, _step(job, "auth"), env, tmp_path)
+    job_auth = Path(env["HOME"]) / ".local/share/opencode/auth.json"
+    job_auth.write_text(json.dumps({"openai": {"type": "oauth", "refresh": "r2", "access": "a2", "expires": 2}}))
+
+    proc, _, _ = _run(tmp_path, _step_by_name(job, "Save refreshed ChatGPT login"), env, tmp_path)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(host_auth.read_text())["openai"]["refresh"] == "r2"

@@ -44,6 +44,22 @@ runner/status.sh                             # units + runners via API
 - Labels: `agents` plus the self-hosted/linux/x64 defaults. Repo-level
   runners only see their own repo.
 
+## ChatGPT login (`openai/*` models)
+
+One shared login for every repo that sets `vars.AGENT_OPENCODE_AUTH`
+(README: ChatGPT login):
+
+```bash
+sudo -iu gh-agents opencode auth login     # OpenAI → "ChatGPT Pro/Plus (headless)"
+sudo -iu gh-agents opencode auth list      # prove: openai listed as oauth
+```
+
+The file is `/home/gh-agents/.local/share/opencode/auth.json` (mode 600). Jobs
+write refreshed tokens back to it. Never copy it into a secret or to another
+host: once one copy refreshes, the others stop working. A job that fails with
+an OpenAI auth error after a refresh race: re-run it. If it fails again, log
+in again.
+
 ## Decommissioning (`factory-ci-*`)
 
 Stop processes → `config.sh remove` (unregisters on GitHub) → remove

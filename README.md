@@ -74,17 +74,41 @@ Agent jobs resolve `runs-on` as `vars.AGENT_RUNNER || inputs.runs-on`:
 - Fleet-wide default: change the `runs-on` default in `agents.yml` (one edit).
 - Per repo: `gh variable set AGENT_RUNNER --value <label> --repo owner/repo`.
 
-Regular CI opts in once per workflow with `runs-on: ${{ vars.CI_RUNNER ||
-'ubuntu-latest' }}`; after that the backend is a repo variable too.
+Regular CI opts in once per workflow, with one variable per runner size so a
+provider's larger machines stay usable:
+
+```yaml
+runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}                        # most jobs
+runs-on: ${{ vars.CI_RUNNER_4 || vars.CI_RUNNER || 'ubuntu-24.04' }}    # 4 vCPU
+runs-on: ${{ vars.CI_RUNNER_8 || vars.CI_RUNNER || 'ubuntu-24.04' }}    # 8 vCPU
+```
+
+After that, switching the CI provider is one command, which sets the three
+variables and shows how they ended up:
+
+```bash
+runner/ci-provider.sh owner/repo depot      # or: github, ubicloud, vps
+```
+
+| Provider | `CI_RUNNER` | `CI_RUNNER_4` | `CI_RUNNER_8` |
+|---|---|---|---|
+| `github` | `ubuntu-24.04` | `ubuntu-24.04` | `ubuntu-24.04` (larger runners need account setup) |
+| `depot` | `depot-ubuntu-24.04` | `depot-ubuntu-24.04-4` | `depot-ubuntu-24.04-8` |
+| `ubicloud` | `ubicloud-standard-2` | `ubicloud-standard-4` | `ubicloud-standard-8` |
+| `vps` | `ci` | `ci` | `ci` — the CI runners on `intrador-tech-vps` (see [CI runners](#ci-runners)); refused while none is online |
+
+Rolling back is running it again with the previous provider. The table lives
+only in `runner/ci-provider.sh`; workflows never name a provider.
 
 Valid labels on this infrastructure:
 
 | Value | Backend |
 |---|---|
-| `self-hosted` | The gh-agents fleet on `intrador-tech-vps` (private repos only) |
-| `ubuntu-latest` | GitHub-hosted |
+| `self-hosted`, `agents` | The gh-agents fleet on `intrador-tech-vps` (private repos only) |
+| `ci` | The CI runners on `intrador-tech-vps`, separate user (private repos only) |
+| `ubuntu-latest`, `ubuntu-24.04` | GitHub-hosted |
 | `depot-ubuntu-24.04`, `depot-ubuntu-24.04-4`, `depot-ubuntu-24.04-8` | Depot |
-| `ubicloud-standard-2` | Ubicloud |
+| `ubicloud-standard-2`, `ubicloud-standard-4`, `ubicloud-standard-8` | Ubicloud |
 
 A label with no matching runner leaves the job queued forever — check
 `runner/status.sh` before switching.
@@ -212,6 +236,7 @@ Scripts under `runner/` run on `intrador-tech-vps` as user `gh-agents`:
 | `status.sh` | Local dirs, systemd units, registered runners per scope |
 | `install-cleanup.sh` | Install the daily `_work` cleanup timer (sudo) |
 | `setup-ci-user.sh [user=gh-ci]` | Prepare the separate CI user with rootless Docker (sudo) |
+| `ci-provider.sh <owner>/<repo> <github\|depot\|ubicloud\|vps>` | Switch a repo's CI provider (sets `CI_RUNNER`, `_4`, `_8`) |
 
 All are idempotent and end by proving the state they claim.
 
@@ -231,6 +256,6 @@ sudo -iu gh-ci env RUNNER_ROLE=ci DOCKER_HOST=unix:///run/user/$(id -u gh-ci)/do
 `RUNNER_ROLE=ci` registers runners named `<scope>-ci-<n>` with only the `ci`
 label (`--no-default-labels`): they never take the agent runners'
 registration, and an agent job asking for `self-hosted` never lands on them.
-The repo opts in with `runs-on: ${{ vars.CI_RUNNER || '<hosted label>' }}` and
-`gh variable set CI_RUNNER --body ci`. The host has 4 vCPUs shared with the
+The repo opts in with the `CI_RUNNER` switch ([Runner switch](#runner-switch))
+and `runner/ci-provider.sh owner/repo vps`. The host has 4 vCPUs shared with the
 agents; expect a slower heavy tier than on hosted runners.

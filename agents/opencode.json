@@ -20,7 +20,7 @@
   "agent": {
     "reviewer": {
       "mode": "primary",
-      "description": "Automatic PR review in CI: BLOCKING/WARNING/NIT format, path:line findings, never approves, never edits.",
+      "description": "PR review in CI on `/oc review`: BLOCKING/WARNING/NIT format, path:line findings, never approves, never edits.",
       "model": "opencode-go/glm-5.3-flash",
       "permission": {
         "edit": "deny",

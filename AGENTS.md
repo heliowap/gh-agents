@@ -24,8 +24,11 @@ user can see.
 3. **Self-hosted runners serve private repos only** — `enable-*.sh` checks
    visibility and refuses public ones.
 4. **No bot triggers a bot.** Comment gates require `user.type != 'Bot'` and
-   `author_association` ∈ OWNER/MEMBER/COLLABORATOR. Reviewers comment; only
-   humans merge.
+   `author_association` ∈ OWNER/MEMBER/COLLABORATOR, with one exception:
+   `/oc review` in a private repo is open to any human commenter (only people
+   with access can comment there; the reviewer only reads and comments, and
+   its config comes from the base branch). Reviews are manual — nothing
+   reviews on push. Reviewers comment; only humans merge.
 5. **Caller repos keep autonomy** — the workflow works with zero repo-side
    config; the caller's `opencode.json` / `.agents/skills/` wins over the
    defaults here.

@@ -9,6 +9,13 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_trusted_issue_comments_reach_the_callee() -> None:
+    for path in (".github/workflows/dogfood.yml", "templates/caller-agents.yml"):
+        caller = yaml.safe_load((ROOT / path).read_text())
+        gate = caller["jobs"]["agents"]["if"]
+        assert "(github.event_name == 'issue_comment' && github.event.issue.pull_request)" not in gate
+
+
 def test_caller_and_callee_gates_and_concurrency_stay_aligned() -> None:
     dogfood = yaml.safe_load((ROOT / ".github/workflows/dogfood.yml").read_text())
     template = yaml.safe_load((ROOT / "templates/caller-agents.yml").read_text())

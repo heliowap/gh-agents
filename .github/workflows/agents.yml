@@ -29,7 +29,7 @@ on:
         type: string
         default: ""
       allow_issue_fix:
-        description: "Also run /oc fix on ordinary issues (uses the default branch); default is PR comments only."
+        description: "Also run /oc fix on ordinary issues; changes open a PR against the default branch. Default is PR comments only."
         type: boolean
         default: false
       use_container:

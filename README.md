@@ -54,6 +54,7 @@ another org or account maps it explicitly, or the key arrives empty:
 | `runs-on` | `self-hosted` | Runner label fallback; the repo's `vars.AGENT_RUNNER` wins. |
 | `model` | `opencode-go/glm-5.3-flash` | OpenCode model for all agents: `provider/model`, or `provider/model#variant` to set the reasoning effort (`openai/gpt-6-luna#xhigh`). |
 | `model_fallbacks` | empty | Comma-separated `provider/model` fallbacks; every candidate is live-probed and the first that answers is used. |
+| `allow_issue_fix` | `false` | Accept `/oc` fixes on ordinary issues from OWNER/MEMBER/COLLABORATOR; changes open a PR against the default branch. |
 | `use_container` | `true` | Run jobs in the runtime image; `false` runs on the host. |
 | `runtime_image` | `ghcr.io/heliowap/gh-agents-runtime:v1` | Job image when `use_container` is true. |
 | `gh_agents_ref` | `v1` | Ref of this repo used for default agents/skills/scripts. |
@@ -160,10 +161,11 @@ Limits:
 - **fix** — on PR comments containing `/oc` or `/opencode` (other than
   `/oc review`), only from OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
   coarse pre-filter (`/ocaml` can queue a wasted run, never a wrong edit); the
-  action's own mention parsing is the real gate. It commits to the PR branch;
-  commands on ordinary issues do not run by default. Set `allow_issue_fix: true`
-  on the caller to accept them; an issue fix checks out and may push to the
-  default branch, subject to its branch protection.
+  action's own mention parsing is the real gate. It commits to the PR branch.
+  Commands on ordinary issues do not run by default. Set `allow_issue_fix: true`
+  in the shipped caller workflow to accept them. When an issue fix produces
+  changes, the action creates a new branch and opens a PR against the default
+  branch.
 - **ci-doctor** — on `workflow_run` completed with `failure`: finds the
   associated PR, posts one diagnosis (probable cause, log evidence, suggested
   fix) ending in `<!-- ci-doctor:<sha> -->`, which is also the dedup key — one

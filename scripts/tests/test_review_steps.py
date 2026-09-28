@@ -313,3 +313,114 @@ def test_agent_check_without_a_session_warns_instead_of_passing_silently(tmp_pat
     proc, _, _ = _agent_check(tmp_path, "review", [], {})
     assert proc.returncode == 0
     assert "::warning" in proc.stdout
+
+
+# --- ChatGPT login (vars.AGENT_OPENCODE_AUTH) ---------------------------------
+
+def _step_by_name(job: str, name: str) -> str:
+    steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
+    return next(s for s in steps if s.get("name") == name)["run"]
+
+
+def _login_env(tmp_path: Path, host_auth: Path) -> dict:
+    # the job copies .gh-agents/scripts from the gh-agents checkout
+    (tmp_path / ".gh-agents").symlink_to(ROOT)
+    home = tmp_path / "home"
+    home.mkdir()
+    return {"HOME": str(home), "XDG_DATA_HOME": "", "HOST_AUTH": str(host_auth),
+            "OPENCODE_API_KEY": "", "FIREWORKS_API_KEY": ""}
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_openai_model_runs_on_the_loaded_chatgpt_login(tmp_path: Path, job: str) -> None:
+    host_auth = tmp_path / "host-auth.json"
+    host_auth.write_text(json.dumps({"openai": {"type": "oauth", "refresh": "r", "access": "a", "expires": 1}}))
+    env = _login_env(tmp_path, host_auth) | {"MODEL": "openai/gpt-5.5"}
+
+    load, _, _ = _run(tmp_path, _step(job, "auth"), env, tmp_path)
+    assert load.returncode == 0, load.stdout + load.stderr
+    preflight, _, _ = _run(tmp_path, _step(job, "preflight"), env, tmp_path)
+    assert preflight.returncode == 0, preflight.stdout + preflight.stderr
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_openai_model_without_a_login_fails_naming_the_variable(tmp_path: Path, job: str) -> None:
+    env = _login_env(tmp_path, tmp_path / "missing.json") | {"MODEL": "openai/gpt-5.5"}
+    proc, _, _ = _run(tmp_path, _step(job, "preflight"), env, tmp_path)
+    assert proc.returncode == 1
+    assert "AGENT_OPENCODE_AUTH" in proc.stdout
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_refreshed_login_is_saved_back_to_the_host(tmp_path: Path, job: str) -> None:
+    host_auth = tmp_path / "host-auth.json"
+    host_auth.write_text(json.dumps({"openai": {"type": "oauth", "refresh": "r1", "access": "a1", "expires": 1}}))
+    env = _login_env(tmp_path, host_auth)
+    _run(tmp_path, _step(job, "auth"), env, tmp_path)
+    job_auth = Path(env["HOME"]) / ".local/share/opencode/auth.json"
+    job_auth.write_text(json.dumps({"openai": {"type": "oauth", "refresh": "r2", "access": "a2", "expires": 2}}))
+
+    proc, _, _ = _run(tmp_path, _step_by_name(job, "Save refreshed ChatGPT login"), env, tmp_path)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads(host_auth.read_text())["openai"]["refresh"] == "r2"
+
+
+# --- model#variant (reasoning effort) -----------------------------------------
+
+def _resolve(tmp_path: Path, job: str, model: str) -> tuple[subprocess.CompletedProcess, str]:
+    # a fake opencode that answers every probe: the step only parses the id
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # opencode v1 (what CI runs) rejects `#variant` in --model: it takes --variant
+    (bin_dir / "opencode").write_text(
+        "#!/bin/sh\n"
+        "echo \"$*\" >> \"$OPENCODE_CALLS\"\n"
+        "case \"$*\" in *'#'*) exit 1 ;; esac\n"
+        "echo ok\n")
+    (bin_dir / "opencode").chmod(0o755)
+    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}", "MODEL": model, "FALLBACKS": "",
+           "OPENCODE_CALLS": str(tmp_path / "opencode_calls")}
+    proc, _, output = _run(tmp_path, _step(job, "model"), env, tmp_path)
+    return proc, output
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_probe_passes_the_variant_as_a_flag(tmp_path: Path, job: str) -> None:
+    proc, _ = _resolve(tmp_path, job, "openai/gpt-6-luna-fast#xhigh")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    call = (tmp_path / "opencode_calls").read_text()
+    assert "--model openai/gpt-6-luna-fast --variant xhigh" in call
+
+
+def test_ci_doctor_runs_the_model_and_variant_apart() -> None:
+    step = next(s for s in yaml.safe_load(WORKFLOW.read_text())["jobs"]["ci-doctor"]["steps"]
+                if s.get("name") == "Diagnose failed run")
+    assert step["env"]["MODEL"] == "${{ steps.model.outputs.base }}"
+    assert step["env"]["VARIANT"] == "${{ steps.model.outputs.variant }}"
+    assert '${VARIANT:+--variant "$VARIANT"}' in step["run"]
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_model_variant_is_split_for_the_opencode_action(tmp_path: Path, job: str) -> None:
+    proc, output = _resolve(tmp_path, job, "openai/gpt-6-luna-fast#xhigh")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "model=openai/gpt-6-luna-fast#xhigh\n" in output
+    assert "base=openai/gpt-6-luna-fast\n" in output
+    assert "variant=xhigh\n" in output
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_model_without_variant_passes_no_variant(tmp_path: Path, job: str) -> None:
+    proc, output = _resolve(tmp_path, job, "opencode-go/glm-5.3-flash")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "base=opencode-go/glm-5.3-flash\n" in output
+    assert "variant=" not in output
+
+
+@pytest.mark.parametrize("job,step_id", [("review", "review"), ("fix", "fix")])
+def test_opencode_action_gets_the_model_and_variant_apart(job: str, step_id: str) -> None:
+    # the action's MODEL must be provider/model; the effort is its `variant` input
+    with_ = _step_def(job, step_id)["with"]
+    assert with_["model"] == "${{ steps.model.outputs.base }}"
+    assert with_["variant"] == "${{ steps.model.outputs.variant }}"

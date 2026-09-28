@@ -19,7 +19,7 @@ on:
         type: string
         default: "self-hosted"
       model:
-        description: "OpenCode model for all agents."
+        description: "OpenCode model for all agents, as provider/model or provider/model#variant (reasoning effort, e.g. #xhigh)."
         type: string
         default: "opencode-go/glm-5.3-flash"
       model_fallbacks:
@@ -117,7 +117,9 @@ jobs:
     # the gate decided: draft, non-PR events and actors without write never get here
     if: needs.gate.outputs.reviewable == 'true'
     runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
-    container: ${{ inputs.use_container && inputs.runtime_image || '' }}
+    # vars.AGENT_OPENCODE_AUTH set = the runner host's opencode auth.json
+    # (ChatGPT login) is mounted into the container (README: ChatGPT login)
+    container: ${{ inputs.use_container && (vars.AGENT_OPENCODE_AUTH == '' && inputs.runtime_image || fromJSON(format('{{"image":"{0}","volumes":["{1}:/gh-agents/auth.json"]}}', inputs.runtime_image, vars.AGENT_OPENCODE_AUTH))) || '' }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -184,16 +186,28 @@ jobs:
               echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
+      - name: Load ChatGPT login
+        # opt-in via vars.AGENT_OPENCODE_AUTH: copies the host login to where
+        # opencode reads it; the refreshed token is saved back after the run
+        id: auth
+        if: vars.AGENT_OPENCODE_AUTH != ''
+        env:
+          HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
+        run: python3 .gh-agents/scripts/opencode_auth.py load "$HOST_AUTH" "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json"
       - name: Preflight provider key
+        id: preflight
         # fork PRs and missing secrets arrive as empty — fail with a readable
         # error. The required secret follows the model's provider prefix.
         run: |
           case "${MODEL%%/*}" in
             fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
+            # openai/* runs on the ChatGPT login, not an API key
+            openai*)    KEY_NAME="ChatGPT login (vars.AGENT_OPENCODE_AUTH)"
+                        key="$(jq -r 'select(.openai.type == "oauth") | "ok"' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null || true)" ;;
             *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
           esac
           if [ -z "$key" ]; then
-            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2) or check fork-PR secret withholding"
+            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2; ChatGPT login for openai/*) or check fork-PR secret withholding"
             exit 1
           fi
         env:
@@ -225,9 +239,15 @@ jobs:
           for m in "${candidates[@]}"; do
             m="${m//[[:space:]]/}"
             [ -z "$m" ] && continue
+            # `provider/model#variant`: opencode v1 (what the action installs)
+            # takes the reasoning effort as --variant, never inside --model
+            base="${m%%#*}"; variant=""
+            [[ "$m" != *"#"* ]] || variant="${m#*#}"
             echo "probing $m"
-            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+            if (cd "$probe" && timeout 120 opencode run --model "$base" ${variant:+--variant "$variant"} 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
+              echo "base=$base" >> "$GITHUB_OUTPUT"
+              [ -z "$variant" ] || echo "variant=$variant" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -255,7 +275,8 @@ jobs:
           # subagents the reviewer spawns, which don't inherit its permissions.
           OPENCODE_CONFIG_CONTENT: '{"default_agent":"reviewer","permission":{"edit":"deny"}}'
         with:
-          model: ${{ steps.model.outputs.model }}
+          model: ${{ steps.model.outputs.base }}
+          variant: ${{ steps.model.outputs.variant }}
           agent: reviewer
           use_github_token: true
           share: false
@@ -266,6 +287,12 @@ jobs:
             `BLOCKING`, `WARNING`, `NIT` — each finding as `path:line` plus why
             it matters, `(none)` under empty sections, and a final line exactly
             `SUMMARY: <n> BLOCKING, <n> WARNING, <n> NIT`. Do not edit files.
+      - name: Save refreshed ChatGPT login
+        # always: a failed run may still have rotated the refresh token
+        if: always() && steps.auth.outcome == 'success'
+        env:
+          HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
+        run: python3 .gh-agents/scripts/opencode_auth.py save "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" "$HOST_AUTH"
       # `opencode github run` ignores the `agent:` input and falls back to
       # `default_agent`, then `build` — no sandbox (#25). OPENCODE_CONFIG_CONTENT
       # pins it; this proves from the session itself that the pin held, since the
@@ -421,7 +448,9 @@ jobs:
       && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
     runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
-    container: ${{ inputs.use_container && inputs.runtime_image || '' }}
+    # vars.AGENT_OPENCODE_AUTH set = the runner host's opencode auth.json
+    # (ChatGPT login) is mounted into the container (README: ChatGPT login)
+    container: ${{ inputs.use_container && (vars.AGENT_OPENCODE_AUTH == '' && inputs.runtime_image || fromJSON(format('{{"image":"{0}","volumes":["{1}:/gh-agents/auth.json"]}}', inputs.runtime_image, vars.AGENT_OPENCODE_AUTH))) || '' }}
     timeout-minutes: 30
     permissions:
       contents: write
@@ -484,14 +513,26 @@ jobs:
               echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
+      - name: Load ChatGPT login
+        # opt-in via vars.AGENT_OPENCODE_AUTH: copies the host login to where
+        # opencode reads it; the refreshed token is saved back after the run
+        id: auth
+        if: vars.AGENT_OPENCODE_AUTH != ''
+        env:
+          HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
+        run: python3 .gh-agents/scripts/opencode_auth.py load "$HOST_AUTH" "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json"
       - name: Preflight provider key
+        id: preflight
         run: |
           case "${MODEL%%/*}" in
             fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
+            # openai/* runs on the ChatGPT login, not an API key
+            openai*)    KEY_NAME="ChatGPT login (vars.AGENT_OPENCODE_AUTH)"
+                        key="$(jq -r 'select(.openai.type == "oauth") | "ok"' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null || true)" ;;
             *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
           esac
           if [ -z "$key" ]; then
-            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2)"
+            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2; ChatGPT login for openai/*)"
             exit 1
           fi
         env:
@@ -519,9 +560,15 @@ jobs:
           for m in "${candidates[@]}"; do
             m="${m//[[:space:]]/}"
             [ -z "$m" ] && continue
+            # `provider/model#variant`: opencode v1 (what the action installs)
+            # takes the reasoning effort as --variant, never inside --model
+            base="${m%%#*}"; variant=""
+            [[ "$m" != *"#"* ]] || variant="${m#*#}"
             echo "probing $m"
-            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+            if (cd "$probe" && timeout 120 opencode run --model "$base" ${variant:+--variant "$variant"} 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
+              echo "base=$base" >> "$GITHUB_OUTPUT"
+              [ -z "$variant" ] || echo "variant=$variant" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -546,10 +593,17 @@ jobs:
           # caller's opencode.json
           OPENCODE_CONFIG_CONTENT: '{"default_agent":"fixer"}'
         with:
-          model: ${{ steps.model.outputs.model }}
+          model: ${{ steps.model.outputs.base }}
+          variant: ${{ steps.model.outputs.variant }}
           agent: fixer
           use_github_token: true
           share: false
+      - name: Save refreshed ChatGPT login
+        # always: a failed run may still have rotated the refresh token
+        if: always() && steps.auth.outcome == 'success'
+        env:
+          HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
+        run: python3 .gh-agents/scripts/opencode_auth.py save "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" "$HOST_AUTH"
       # `opencode github run` ignores the `agent:` input and falls back to
       # `default_agent`, then `build` — no sandbox (#25). OPENCODE_CONFIG_CONTENT
       # pins it; this proves from the session itself that the pin held, since the
@@ -591,7 +645,9 @@ jobs:
       && github.event.workflow_run.conclusion == 'failure'
       && (inputs.ci_workflows == '' || contains(inputs.ci_workflows, github.event.workflow_run.name))
     runs-on: ${{ vars.AGENT_RUNNER || inputs.runs-on }}
-    container: ${{ inputs.use_container && inputs.runtime_image || '' }}
+    # vars.AGENT_OPENCODE_AUTH set = the runner host's opencode auth.json
+    # (ChatGPT login) is mounted into the container (README: ChatGPT login)
+    container: ${{ inputs.use_container && (vars.AGENT_OPENCODE_AUTH == '' && inputs.runtime_image || fromJSON(format('{{"image":"{0}","volumes":["{1}:/gh-agents/auth.json"]}}', inputs.runtime_image, vars.AGENT_OPENCODE_AUTH))) || '' }}
     timeout-minutes: 20
     permissions:
       actions: read
@@ -631,14 +687,26 @@ jobs:
               echo "/.agents/skills/$name/" >> "$exclude"
             fi
           done
+      - name: Load ChatGPT login
+        # opt-in via vars.AGENT_OPENCODE_AUTH: copies the host login to where
+        # opencode reads it; the refreshed token is saved back after the run
+        id: auth
+        if: vars.AGENT_OPENCODE_AUTH != ''
+        env:
+          HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
+        run: python3 .gh-agents/scripts/opencode_auth.py load "$HOST_AUTH" "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json"
       - name: Preflight provider key
+        id: preflight
         run: |
           case "${MODEL%%/*}" in
             fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
+            # openai/* runs on the ChatGPT login, not an API key
+            openai*)    KEY_NAME="ChatGPT login (vars.AGENT_OPENCODE_AUTH)"
+                        key="$(jq -r 'select(.openai.type == "oauth") | "ok"' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null || true)" ;;
             *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
           esac
           if [ -z "$key" ]; then
-            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2)"
+            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2; ChatGPT login for openai/*)"
             exit 1
           fi
         env:
@@ -694,9 +762,15 @@ jobs:
           for m in "${candidates[@]}"; do
             m="${m//[[:space:]]/}"
             [ -z "$m" ] && continue
+            # `provider/model#variant`: opencode v1 (what the action installs)
+            # takes the reasoning effort as --variant, never inside --model
+            base="${m%%#*}"; variant=""
+            [[ "$m" != *"#"* ]] || variant="${m#*#}"
             echo "probing $m"
-            if (cd "$probe" && timeout 120 opencode run --model "$m" 'Reply with exactly: ok') >/dev/null 2>&1; then
+            if (cd "$probe" && timeout 120 opencode run --model "$base" ${variant:+--variant "$variant"} 'Reply with exactly: ok') >/dev/null 2>&1; then
               echo "model=$m" >> "$GITHUB_OUTPUT"
+              echo "base=$base" >> "$GITHUB_OUTPUT"
+              [ -z "$variant" ] || echo "variant=$variant" >> "$GITHUB_OUTPUT"
               echo "using $m"
               exit 0
             fi
@@ -710,7 +784,8 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           GH_TOKEN: ${{ github.token }}
-          MODEL: ${{ steps.model.outputs.model }}
+          MODEL: ${{ steps.model.outputs.base }}
+          VARIANT: ${{ steps.model.outputs.variant }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
@@ -725,6 +800,12 @@ jobs:
           # failed run's logs so they don't become annotations on THIS run.
           # Unanchored: agent output may prepend ANSI escapes, and the runner
           # strips them before command parsing.
-          opencode run --model "$MODEL" --agent ci-doctor "$prompt" 2>&1 \
+          opencode run --model "$MODEL" ${VARIANT:+--variant "$VARIANT"} --agent ci-doctor "$prompt" 2>&1 \
             | sed -e 's/##\[/## [/g' \
                   -e 's/::\(add-mask\|debug\|error\|warning\|notice\|group\|endgroup\|echo\|stop-commands\)::/:: \1::/g'
+      - name: Save refreshed ChatGPT login
+        # always: a failed run may still have rotated the refresh token
+        if: always() && steps.auth.outcome == 'success'
+        env:
+          HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
+        run: python3 .gh-agents/scripts/opencode_auth.py save "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" "$HOST_AUTH"

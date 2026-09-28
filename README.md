@@ -20,6 +20,9 @@ required beyond a secret.
    gh secret set FIREWORKS_API_KEY --repo owner/repo     # fireworks/… models
    ```
 
+   `openai/…` models run on a ChatGPT Plus/Pro login instead of a key — see
+   [ChatGPT login](#chatgpt-login).
+
 3. Copy `templates/caller-agents.yml` to `.github/workflows/agents.yml` in the
    repo. Set `on.pull_request.branches` to the target branch and
    `on.workflow_run.workflows` to the repo's exact CI workflow names.
@@ -49,7 +52,7 @@ another org or account maps it explicitly, or the key arrives empty:
 | Input | Default | Meaning |
 |---|---|---|
 | `runs-on` | `self-hosted` | Runner label fallback; the repo's `vars.AGENT_RUNNER` wins. |
-| `model` | `opencode-go/glm-5.3-flash` | OpenCode model for all agents. |
+| `model` | `opencode-go/glm-5.3-flash` | OpenCode model for all agents: `provider/model`, or `provider/model#variant` to set the reasoning effort (`openai/gpt-6-luna#xhigh`). |
 | `model_fallbacks` | empty | Comma-separated `provider/model` fallbacks; every candidate is live-probed and the first that answers is used. |
 | `use_container` | `true` | Run jobs in the runtime image; `false` runs on the host. |
 | `runtime_image` | `ghcr.io/heliowap/gh-agents-runtime:v1` | Job image when `use_container` is true. |
@@ -61,7 +64,8 @@ requires the key matching the `model` provider — `OPENCODE_API_KEY` for
 `opencode-go/…` (the default), `FIREWORKS_API_KEY` for `fireworks/…`. The
 Fireworks provider is declared in the default `agents/opencode.json`
 (OpenAI-compatible endpoint, key via `{env:FIREWORKS_API_KEY}`); a caller's
-own `opencode.json` can declare others the same way.
+own `opencode.json` can declare others the same way. `openai/…` needs no
+secret: the preflight checks for the ChatGPT login below.
 
 ## Runner switch
 
@@ -84,6 +88,54 @@ Valid labels on this infrastructure:
 
 A label with no matching runner leaves the job queued forever — check
 `runner/status.sh` before switching.
+
+## ChatGPT login
+
+`openai/…` models can run on a ChatGPT
+Plus/Pro subscription instead of an API key. The login lives in one file on
+the runner host. It is never a GitHub secret: its refresh token rotates each
+time it is used, so a copy in a secret stops working after the first refresh.
+
+1. On the runner host, as the runner user, log in once. Choose OpenAI, then
+   `ChatGPT Pro/Plus (headless)`; it prints a code to confirm from a browser on
+   another machine:
+
+   ```bash
+   sudo -iu gh-agents opencode auth login
+   sudo -iu gh-agents opencode auth list      # openai shows as oauth
+   ```
+
+2. Point the repo (or the whole org) at that file:
+
+   ```bash
+   gh variable set AGENT_OPENCODE_AUTH --repo owner/repo \
+     --body /home/gh-agents/.local/share/opencode/auth.json
+   ```
+
+3. Set the model in the caller workflow. `#variant` sets the reasoning effort,
+   and the `-fast` model id is OpenAI's priority tier (fast mode):
+
+   ```yaml
+   with:
+     model: openai/gpt-6-luna-fast#xhigh
+   ```
+
+With the variable set, each agent job mounts the file into the container,
+copies it to where opencode reads it, and writes a refreshed OAuth entry back
+to the host after the run. It writes back only when the entry is newer than
+the host's, so an older job never undoes a newer refresh. Host-mode jobs
+(`use_container: false`) read the file in place.
+
+Limits:
+
+- Self-hosted runners only. A GitHub-hosted runner has no such file; the
+  preflight fails naming `AGENT_OPENCODE_AUTH`.
+- Every repo that sets the variable spends the same ChatGPT account's limits.
+- Two jobs that refresh at the same moment can race: one of them fails with an
+  auth error. Re-run it. If the login stays broken, log in again (step 1).
+- The `/oc` fixer and the reviewer run shell commands in the job, so they can
+  read the login, just as they can read the provider keys in their
+  environment. Enable it only where you already trust the agents with keys.
 
 ## What the agents do
 
@@ -133,6 +185,8 @@ win; a repo with neither gets this repo's defaults copied in at run time.
   PAT used by `runner/` scripts lives in the operator's shell, never in a
   workflow or secret.
 - Fork PRs get no secrets: jobs fail fast on an empty provider key.
+- The ChatGPT login stays on the runner host, outside the repo and GitHub
+  secrets; only repos with `vars.AGENT_OPENCODE_AUTH` set mount it.
 
 ## Reserved paths
 

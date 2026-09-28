@@ -61,6 +61,10 @@ sudo -iu gh-ci env RUNNER_ROLE=ci DOCKER_HOST=unix:///run/user/$(id -u gh-ci)/do
   variable goes on `disable-repo.sh`; without it the script targets the
   agent runners.
 - Never add `gh-ci` to the `docker` group: that is root on the host.
+- Switch a repo's CI between providers with
+  `runner/ci-provider.sh <owner>/<repo> <github|depot|ubicloud|vps>` (runs
+  anywhere `gh` is authenticated; `vps` refuses while no `ci` runner is
+  online). Idle CI runners cost nothing; keep them registered to switch back.
 - `install-cleanup.sh` covers `gh-agents` only; CI `_work` dirs are not
   cleaned automatically yet.
 

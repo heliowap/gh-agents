@@ -29,7 +29,7 @@ Data: 2026-09-24. Status: aprovado em conversa; aguardando revisão escrita.
 | Fleet | nova, usuário dedicado; `factory-ci` descomissionado |
 | Repos pessoais | ficam em `heliowap` (repo-runners); orgs usam org-runners |
 | Repos p/ self-hosted | só privados |
-| Gate de comentário | `author_association` ∈ {OWNER, MEMBER, COLLABORATOR}, não-Bot |
+| Gate de comentário | `author_association` ∈ {OWNER, MEMBER, COLLABORATOR}, não-Bot (delta 2026-09-28: `/oc review` em repo privado aceita qualquer humano) |
 | Modelo | `opencode-go/glm-5.3-flash` (ZDR), igual ao atual |
 
 ## Arquitetura
@@ -177,6 +177,23 @@ chamador — **verificar na implementação**; fallback documentado: caller pass
    commit; CI quebrado → comentário de diagnóstico; `vars.AGENT_RUNNER`
    trocado → job vai para outro backend.
 5. Habilitar orgs (`intrador`, `All-Medical`) e demais repos sob demanda.
+
+## Delta 2026-09-28 — review manual
+
+- O review deixa de rodar em `pull_request`: só um comentário `/oc review`
+  (ou `/opencode review`) num PR dispara. Pedido do operador: reviews
+  automáticos gastavam modelo em todo push.
+- Repo privado: qualquer humano pode pedir (só quem tem acesso comenta lá).
+  Repo público: OWNER/MEMBER/COLLABORATOR. Bot nunca. O fixer (`/oc` que não
+  é review) continua só para colaboradores, porque faz push.
+- O job de review usa `opencode run --agent reviewer` em vez da action: a
+  action (`opencode github run`, v1) exige write de quem disparou.
+- Como o job tem as chaves e qualquer um com acesso pode dispará-lo, a config
+  que dá permissão ou executa código (`opencode.json(c)`, `.opencode/`,
+  `.agents/skills/`) vem da base do PR, nunca do PR; plugins desligados
+  (`--pure`).
+- `issue_comment` usa o workflow do branch default: o caller precisa estar no
+  branch default do repo para `/oc` funcionar.
 
 ## Fora de escopo / v2
 

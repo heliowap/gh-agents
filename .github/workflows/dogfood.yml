@@ -1,19 +1,15 @@
 name: agents
 
-# Dogfood: this repo reviews its own PRs with the workflow it ships.
+# Dogfood: this repo reviews its own PRs with the workflow it ships, when a
+# collaborator comments `/oc review` (public repo: collaborators only).
 # `uses: ./` pins the callee to the same commit — a PR that changes
 # agents.yml is reviewed by the changed version, not by @v1.
 # Not a merge gate: review comments, a human merges.
 #
 # runs-on: ubuntu-latest by choice — the repo is public; self-hosted
 # runners serve private repos only (AGENTS.md invariant 3).
-# No paths-ignore: specs/conventions are the product surface here —
-# doc-only PRs get reviewed too.
 
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
     types: [created]
   pull_request_review_comment:
@@ -37,15 +33,19 @@ jobs:
     uses: ./.github/workflows/agents.yml
     # Only trusted PR commands enter concurrency. Otherwise an unrelated
     # comment can replace a pending /oc request; plain issues never run fix.
+    # Reviews are manual: `/oc review` from any human in a private repo (only
+    # people with access can comment there); every other /oc, and anything
+    # in a public repo, needs OWNER/MEMBER/COLLABORATOR. Never a bot.
     if: >-
-      github.event_name == 'pull_request'
-      || github.event_name == 'workflow_run'
+      github.event_name == 'workflow_run'
       || (
         ((github.event_name == 'issue_comment' && github.event.issue.pull_request)
           || github.event_name == 'pull_request_review_comment')
         && github.event.comment.user.type != 'Bot'
-        && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
         && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
+        && (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+          || (github.event.repository.private
+            && (contains(github.event.comment.body, '/oc review') || contains(github.event.comment.body, '/opencode review'))))
       )
     # The caller job gates concurrency before invoking the callee; the callee
     # mirrors these lanes in a separate namespace. Group by trigger lane +
@@ -53,8 +53,9 @@ jobs:
     # another app's included — cancelled the in-flight review (intrador
     # #1417, run 34868746805). A queued run is replaced by the next arrival,
     # so a target-only group would let a plain comment drop a pending review.
-    # Both /oc comment event types share the fix lane so fixers for one PR
-    # cannot push concurrently to its branch.
+    # `/oc review` comments take the review lane and every other /oc comment
+    # the fix lane: a review never waits behind a fixer, and fixers for one
+    # PR cannot push concurrently to its branch.
     # Keep lanes and target expression aligned with the template and callee;
     # scripts/tests/test_caller_workflows.py checks the relation.
     concurrency:
@@ -62,12 +63,12 @@ jobs:
       # never collides there; ci-doctor dedup comes from its marker comment.
       # Every declared event has a target; run_id isolates malformed payloads.
       group: >-
-        gh-agents-${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && 'fix' || github.event_name }}-${{ github.event.pull_request.number
+        gh-agents-${{ (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && (contains(github.event.comment.body, '/oc review') || contains(github.event.comment.body, '/opencode review')) && 'review' || (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') && 'fix' || github.event_name }}-${{ github.event.pull_request.number
         || github.event.issue.number || github.event.workflow_run.id
         || github.run_id }}
-      # A newer PR revision supersedes its review. Comments queue; a new
-      # /oc request must not interrupt a fixer already editing the branch.
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      # Comments queue: a new /oc request must not interrupt a review or a
+      # fixer already running.
+      cancel-in-progress: false
     secrets:
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
       FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}

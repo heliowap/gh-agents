@@ -61,40 +61,6 @@ def _run(tmp_path: Path, script: str, env: dict, cwd: Path) -> tuple[subprocess.
     return proc, calls, output.read_text()
 
 
-# --- actor gate (#19) ---------------------------------------------------------
-
-def _gate(tmp_path: Path, actor: str, permission: str | None):
-    answer = f"print({permission!r})\n" if permission else "sys.exit(1)\n"
-    env = _fake_gh(tmp_path, answer) | {"ACTOR": actor}
-    return _run(tmp_path, _step("gate", "actor"), env, tmp_path)
-
-
-def test_gate_skips_actor_without_write(tmp_path: Path) -> None:
-    proc, calls, output = _gate(tmp_path, "devin-ai-integration[bot]", "none")
-    assert proc.returncode == 0, proc.stderr
-    assert "reviewable=false" in output
-    assert "::notice" in proc.stdout and "devin-ai-integration[bot]" in proc.stdout
-    assert calls[0][:2] == ["api", "repos/example/repo/collaborators/devin-ai-integration[bot]/permission"]
-
-
-def test_gate_skips_read_only_actor(tmp_path: Path) -> None:
-    _, _, output = _gate(tmp_path, "someone", "read")
-    assert "reviewable=false" in output
-
-
-def test_gate_reviews_actor_with_write(tmp_path: Path) -> None:
-    for perm in ("write", "maintain", "admin"):
-        (tmp_path / perm).mkdir()
-        _, _, output = _gate(tmp_path / perm, "heliowap", perm)
-        assert "reviewable=true" in output, perm
-
-
-def test_gate_fails_open_when_the_lookup_fails(tmp_path: Path) -> None:
-    proc, _, output = _gate(tmp_path, "heliowap", None)
-    assert proc.returncode == 0, proc.stderr
-    assert "reviewable=true" in output
-
-
 # --- PR state before checkout (#28) -------------------------------------------
 
 def _pr_state(tmp_path: Path, job: str, responses: list[str]):
@@ -418,9 +384,129 @@ def test_model_without_variant_passes_no_variant(tmp_path: Path, job: str) -> No
     assert "variant=" not in output
 
 
-@pytest.mark.parametrize("job,step_id", [("review", "review"), ("fix", "fix")])
+@pytest.mark.parametrize("job,step_id", [("fix", "fix")])
 def test_opencode_action_gets_the_model_and_variant_apart(job: str, step_id: str) -> None:
     # the action's MODEL must be provider/model; the effort is its `variant` input
     with_ = _step_def(job, step_id)["with"]
     assert with_["model"] == "${{ steps.model.outputs.base }}"
     assert with_["variant"] == "${{ steps.model.outputs.variant }}"
+
+
+# --- manual review: `/oc review` (2026-09-28) ---------------------------------
+
+def _jobs() -> dict:
+    return yaml.safe_load(WORKFLOW.read_text())["jobs"]
+
+
+def test_no_job_reviews_on_its_own() -> None:
+    # reviews are manual: a push or an opened PR never starts one
+    jobs = _jobs()
+    assert "gate" not in jobs
+    assert "pull_request'" not in jobs["review"]["if"].replace("pull_request_review_comment'", "")
+    assert "/oc review" in jobs["review"]["if"] and "/opencode review" in jobs["review"]["if"]
+
+
+def test_review_is_open_to_any_human_in_private_repos_only() -> None:
+    gate = _jobs()["review"]["if"]
+    assert "github.event.comment.user.type != 'Bot'" in gate
+    assert "github.event.repository.private" in gate
+    assert "author_association" in gate  # public repos keep the collaborator gate
+
+
+def test_oc_review_never_starts_the_fixer() -> None:
+    gate = _jobs()["fix"]["if"]
+    assert "!contains(github.event.comment.body, '/oc review')" in gate
+    assert "!contains(github.event.comment.body, '/opencode review')" in gate
+    assert "author_association" in gate  # the fixer pushes: collaborators only
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                          cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+def _pr_checkout(tmp_path: Path, base_files: dict, pr_files: dict) -> Path:
+    """A clone whose HEAD is the PR and whose origin/main is the base."""
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-q", "-b", "main")
+    for name, text in base_files.items():
+        (origin / name).parent.mkdir(parents=True, exist_ok=True)
+        (origin / name).write_text(text)
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-q", "--allow-empty", "-m", "base")
+    _git(origin, "checkout", "-q", "-b", "pr")
+    for name, text in pr_files.items():
+        (origin / name).parent.mkdir(parents=True, exist_ok=True)
+        (origin / name).write_text(text)
+    _git(origin, "add", "-A")
+    _git(origin, "commit", "-q", "-m", "pr")
+    work = tmp_path / "work"
+    _git(tmp_path, "clone", "-q", str(origin), str(work))
+    _git(work, "checkout", "-q", "pr")
+    (work / ".gh-agents").symlink_to(ROOT)
+    return work
+
+
+def test_review_config_comes_from_the_base_branch_never_the_pr(tmp_path: Path) -> None:
+    # a PR could otherwise widen the reviewer's permissions or load a plugin
+    # while the job holds the provider keys and the ChatGPT login
+    work = _pr_checkout(
+        tmp_path,
+        {"opencode.json": '{"base": true}'},
+        {"opencode.json": '{"agent": {"reviewer": {"permission": {"bash": "allow"}}}}',
+         ".opencode/plugin/evil.ts": "steal()", "src/app.py": "print(1)"})
+    proc, _, _ = _run(tmp_path, _step("review", "config"), {"BASE": "main"}, work)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert json.loads((work / "opencode.json").read_text()) == {"base": True}
+    assert not (work / ".opencode").exists()
+    assert (work / "src/app.py").read_text() == "print(1)"  # the code under review stays
+
+
+def test_review_config_falls_back_to_gh_agents_defaults(tmp_path: Path) -> None:
+    work = _pr_checkout(tmp_path, {"README.md": "x"}, {"opencode.json": '{"pr": true}'})
+    proc, _, _ = _run(tmp_path, _step("review", "config"), {"BASE": "main"}, work)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (work / "opencode.json").read_text() == (ROOT / "agents/opencode.json").read_text()
+    assert "/opencode.json" in (work / ".git/info/exclude").read_text()
+
+
+def _fake_opencode(tmp_path: Path, events: list[dict]) -> dict:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    out = "".join(json.dumps(e) + "\n" for e in events)
+    (bin_dir / "opencode").write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$*" >> "$OPENCODE_CALLS"\n'
+        f"cat <<'EOF'\n{out}EOF\n")
+    (bin_dir / "opencode").chmod(0o755)
+    return {"OPENCODE_CALLS": str(tmp_path / "opencode_calls")}
+
+
+def test_review_runs_the_reviewer_and_posts_its_final_message(tmp_path: Path) -> None:
+    review = "BLOCKING\n(none)\n\nSUMMARY: 0 BLOCKING, 0 WARNING, 0 NIT"
+    env = _fake_gh(tmp_path, "") | _fake_opencode(tmp_path, [
+        {"type": "text", "part": {"type": "text", "text": "Reading the diff.", "messageID": "m1"}},
+        {"type": "text", "part": {"type": "text", "text": review, "messageID": "m2"}},
+    ]) | {"PR": "23", "MODEL": "openai/gpt-6-luna-fast", "VARIANT": "xhigh"}
+    (tmp_path / ".gh-agents").symlink_to(ROOT)
+    proc, calls, _ = _run(tmp_path, _step("review", "review"), env, tmp_path)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    call = (tmp_path / "opencode_calls").read_text()
+    assert "--pure" in call and "--agent reviewer" in call and "--format json" in call
+    assert "--model openai/gpt-6-luna-fast --variant xhigh" in call
+    comment = next(c for c in calls if c[:2] == ["pr", "comment"])
+    assert comment[2] == "23"
+    posted = Path(comment[comment.index("--body-file") + 1]).read_text()
+    assert posted.strip() == review
+
+
+def test_review_that_failed_posts_nothing(tmp_path: Path) -> None:
+    env = _fake_gh(tmp_path, "") | _fake_opencode(tmp_path, [
+        {"type": "error", "error": {"name": "APIError", "data": {"message": "Insufficient account funds"}}},
+    ]) | {"PR": "23", "MODEL": "opencode-go/glm-5.3-flash", "VARIANT": ""}
+    (tmp_path / ".gh-agents").symlink_to(ROOT)
+    proc, calls, _ = _run(tmp_path, _step("review", "review"), env, tmp_path)
+    assert proc.returncode == 1
+    assert "Insufficient account funds" in proc.stdout + proc.stderr
+    assert not any(c[:2] == ["pr", "comment"] for c in calls)

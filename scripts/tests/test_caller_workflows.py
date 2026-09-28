@@ -23,10 +23,16 @@ def test_caller_and_callee_gates_and_concurrency_stay_aligned() -> None:
     event_equals = r"github\.event_name\s*==\s*'([^']+)'"
     lane_events = set(re.findall(event_equals, caller_group["group"]))
     fixer_events = set(re.findall(event_equals, callee["jobs"]["fix"]["if"]))
+    review_events = set(re.findall(event_equals, callee["jobs"]["review"]["if"]))
     caller_events = set(re.findall(event_equals, dogfood["jobs"]["agents"]["if"]))
     assert lane_events
-    assert lane_events == fixer_events
-    assert caller_events == lane_events | {"pull_request", "workflow_run"}
+    assert lane_events == fixer_events == review_events
+    # reviews are manual (`/oc review`): no caller listens to pull_request
+    assert caller_events == lane_events | {"workflow_run"}
+    # a caller must let `/oc review` through wherever the callee accepts it
+    for caller in (dogfood, template):
+        gate = caller["jobs"]["agents"]["if"]
+        assert "github.event.repository.private" in gate and "/oc review" in gate
     # PyYAML's YAML 1.1 loader reads the Actions `on` key as True.
     for caller in (dogfood, template):
         assert set(caller.get("on", caller.get(True, {}))) == caller_events

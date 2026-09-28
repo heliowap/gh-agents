@@ -28,6 +28,10 @@ on:
         description: "Comma-separated provider/model fallbacks, live-probed in order; the first that answers is used."
         type: string
         default: ""
+      allow_issue_fix:
+        description: "Also run /oc fix on ordinary issues (uses the default branch); default is PR comments only."
+        type: boolean
+        default: false
       use_container:
         description: "Run jobs in the gh-agents-runtime image. false = host (repos whose tests need Docker; less isolation)."
         type: boolean
@@ -195,27 +199,19 @@ jobs:
         # opencode reads it; the refreshed token is saved back after the run
         id: auth
         if: vars.AGENT_OPENCODE_AUTH != ''
+        # A missing login may use a configured API-key fallback.
+        continue-on-error: ${{ inputs.model_fallbacks != '' }}
         env:
           HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
         run: python3 .gh-agents/scripts/opencode_auth.py load "$HOST_AUTH" "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json"
       - name: Preflight provider key
         id: preflight
-        # fork PRs and missing secrets arrive as empty — fail with a readable
-        # error. The required secret follows the model's provider prefix.
-        run: |
-          case "${MODEL%%/*}" in
-            fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
-            # openai/* runs on the ChatGPT login, not an API key
-            openai*)    KEY_NAME="ChatGPT login (vars.AGENT_OPENCODE_AUTH)"
-                        key="$(jq -r 'select(.openai.type == "oauth") | "ok"' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null || true)" ;;
-            *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
-          esac
-          if [ -z "$key" ]; then
-            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2; ChatGPT login for openai/*) or check fork-PR secret withholding"
-            exit 1
-          fi
+        # Fork PRs and missing secrets arrive empty; any viable candidate
+        # (primary or fallback) may proceed to the live probe.
+        run: python3 .gh-agents/scripts/model_preflight.py
         env:
           MODEL: ${{ inputs.model }}
+          FALLBACKS: ${{ inputs.model_fallbacks }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
       - name: Ensure opencode CLI
@@ -439,13 +435,13 @@ jobs:
 
   fix:
     name: Fix (/oc)
-    # Comments are untrusted input: only PR comments from
-    # OWNER/MEMBER/COLLABORATOR, never a bot (a bot must not trigger a bot).
+    # Comments are untrusted input: only OWNER/MEMBER/COLLABORATOR may fix
+    # a PR or issue, never a bot (a bot must not trigger a bot).
     # The fixer pushes, so it stays collaborator-only; `/oc review` is the
     # review job's.
     if: >-
       (github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment')
-      && (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
+      && (github.event_name != 'issue_comment' || github.event.issue.pull_request != null || inputs.allow_issue_fix)
       && github.event.comment.user.type != 'Bot'
       && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
@@ -463,6 +459,9 @@ jobs:
     steps:
       - name: Check PR is still open
         id: pr-state
+        # Ordinary issue commands work on the default branch; only PRs have
+        # a state to check before pushing to their head branch.
+        if: github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request != null
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number || github.event.issue.number }}
@@ -522,25 +521,16 @@ jobs:
         # opencode reads it; the refreshed token is saved back after the run
         id: auth
         if: vars.AGENT_OPENCODE_AUTH != ''
+        continue-on-error: ${{ inputs.model_fallbacks != '' }}
         env:
           HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
         run: python3 .gh-agents/scripts/opencode_auth.py load "$HOST_AUTH" "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json"
       - name: Preflight provider key
         id: preflight
-        run: |
-          case "${MODEL%%/*}" in
-            fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
-            # openai/* runs on the ChatGPT login, not an API key
-            openai*)    KEY_NAME="ChatGPT login (vars.AGENT_OPENCODE_AUTH)"
-                        key="$(jq -r 'select(.openai.type == "oauth") | "ok"' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null || true)" ;;
-            *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
-          esac
-          if [ -z "$key" ]; then
-            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2; ChatGPT login for openai/*)"
-            exit 1
-          fi
+        run: python3 .gh-agents/scripts/model_preflight.py
         env:
           MODEL: ${{ inputs.model }}
+          FALLBACKS: ${{ inputs.model_fallbacks }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
       - name: Ensure opencode CLI
@@ -696,25 +686,16 @@ jobs:
         # opencode reads it; the refreshed token is saved back after the run
         id: auth
         if: vars.AGENT_OPENCODE_AUTH != ''
+        continue-on-error: ${{ inputs.model_fallbacks != '' }}
         env:
           HOST_AUTH: ${{ inputs.use_container && '/gh-agents/auth.json' || vars.AGENT_OPENCODE_AUTH }}
         run: python3 .gh-agents/scripts/opencode_auth.py load "$HOST_AUTH" "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json"
       - name: Preflight provider key
         id: preflight
-        run: |
-          case "${MODEL%%/*}" in
-            fireworks*) key="${FIREWORKS_API_KEY:-${OPENCODE_API_KEY:-}}"; KEY_NAME="FIREWORKS_API_KEY or OPENCODE_API_KEY" ;;
-            # openai/* runs on the ChatGPT login, not an API key
-            openai*)    KEY_NAME="ChatGPT login (vars.AGENT_OPENCODE_AUTH)"
-                        key="$(jq -r 'select(.openai.type == "oauth") | "ok"' "${XDG_DATA_HOME:-$HOME/.local/share}/opencode/auth.json" 2>/dev/null || true)" ;;
-            *)         KEY_NAME=OPENCODE_API_KEY;  key="${OPENCODE_API_KEY:-}" ;;
-          esac
-          if [ -z "$key" ]; then
-            echo "::error::$KEY_NAME is empty — set the repo secret (README onboarding step 2; ChatGPT login for openai/*)"
-            exit 1
-          fi
+        run: python3 .gh-agents/scripts/model_preflight.py
         env:
           MODEL: ${{ inputs.model }}
+          FALLBACKS: ${{ inputs.model_fallbacks }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
       # Dedup is deterministic, not LLM-decided: one diagnosis per (run, sha),

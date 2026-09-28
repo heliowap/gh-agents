@@ -128,11 +128,13 @@ the host's, so an older job never undoes a newer refresh. Host-mode jobs
 
 Limits:
 
-- Self-hosted runners only. A GitHub-hosted runner has no such file; the
-  preflight fails naming `AGENT_OPENCODE_AUTH`.
+- A GitHub-hosted runner has no shared ChatGPT login file. Without a
+  credentialed fallback, preflight fails naming `AGENT_OPENCODE_AUTH`.
 - Every repo that sets the variable spends the same ChatGPT account's limits.
-- Two jobs that refresh at the same moment can race: one of them fails with an
-  auth error. Re-run it. If the login stays broken, log in again (step 1).
+- Two jobs that refresh at the same moment can race. Re-run the failed job.
+  If the login stays broken, log in again (step 1). When `model_fallbacks`
+  includes an API-key model with credentials, a missing login lets the job
+  probe that fallback instead.
 - The `/oc` fixer and the reviewer run shell commands in the job, so they can
   read the login, just as they can read the provider keys in their
   environment. Enable it only where you already trust the agents with keys.
@@ -159,7 +161,9 @@ Limits:
   `/oc review`), only from OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
   coarse pre-filter (`/ocaml` can queue a wasted run, never a wrong edit); the
   action's own mention parsing is the real gate. It commits to the PR branch;
-  commands on ordinary issues do not run.
+  commands on ordinary issues do not run by default. Set `allow_issue_fix: true`
+  on the caller to accept them; an issue fix checks out and may push to the
+  default branch, subject to its branch protection.
 - **ci-doctor** — on `workflow_run` completed with `failure`: finds the
   associated PR, posts one diagnosis (probable cause, log evidence, suggested
   fix) ending in `<!-- ci-doctor:<sha> -->`, which is also the dedup key — one

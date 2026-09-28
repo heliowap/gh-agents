@@ -318,6 +318,20 @@ def test_openai_model_without_a_login_fails_naming_the_variable(tmp_path: Path, 
 
 
 @pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
+def test_missing_chatgpt_login_allows_fireworks_fallback(tmp_path: Path, job: str) -> None:
+    env = _login_env(tmp_path, tmp_path / "missing.json") | {
+        "MODEL": "openai/gpt-6-luna-fast#xhigh",
+        "FALLBACKS": "fireworks-ai/accounts/fireworks/models/glm-5p3-flash",
+        "FIREWORKS_API_KEY": "test-key",
+    }
+    load, _, _ = _run(tmp_path, _step(job, "auth"), env, tmp_path)
+    assert load.returncode == 1
+    assert _step_def(job, "auth")["continue-on-error"] == "${{ inputs.model_fallbacks != '' }}"
+    preflight, _, _ = _run(tmp_path, _step(job, "preflight"), env, tmp_path)
+    assert preflight.returncode == 0, preflight.stdout + preflight.stderr
+
+
+@pytest.mark.parametrize("job", ["review", "fix", "ci-doctor"])
 def test_refreshed_login_is_saved_back_to_the_host(tmp_path: Path, job: str) -> None:
     host_auth = tmp_path / "host-auth.json"
     host_auth.write_text(json.dumps({"openai": {"type": "oauth", "refresh": "r1", "access": "a1", "expires": 1}}))

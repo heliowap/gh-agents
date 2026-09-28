@@ -8,6 +8,7 @@ setup() {
   export GH_CALLS="$TEST_HOME/gh-calls"; : > "$GH_CALLS"
   export VARS="$TEST_HOME/vars"; : > "$VARS"
   export CI_RUNNERS_ONLINE=1
+  export REPO_VISIBILITY=private
   cat > "$STUB/gh" <<'EOS'
 #!/usr/bin/env bash
 # stub: variable set/list backed by a file; runners answer per CI_RUNNERS_ONLINE
@@ -18,11 +19,12 @@ case "$1 $2" in
   "auth status") exit 0 ;;
   "variable set") name="$3"; shift 3
     while [ $# -gt 0 ]; do case "$1" in --body) body="$2"; shift 2;; *) shift;; esac; done
-    grep -v "^$name	" "$VARS" > "$VARS.tmp" || true; mv "$VARS.tmp" "$VARS"
+    awk -F'\t' -v n="$name" '$1 != n' "$VARS" > "$VARS.tmp"; mv "$VARS.tmp" "$VARS"
     printf '%s\t%s\n' "$name" "$body" >> "$VARS"; exit 0 ;;
   "variable list") cat "$VARS"; exit 0 ;;
 esac
 case "$*" in
+  *"repos/o/r --jq .visibility"*) json="{\"visibility\":\"$REPO_VISIBILITY\"}" ;;
   *"/actions/runners"*)
     if [ "$CI_RUNNERS_ONLINE" = 1 ]; then
       json='{"runners":[{"name":"o--r-ci-1","status":"online","labels":[{"name":"ci"}]},{"name":"o--r-1","status":"online","labels":[{"name":"self-hosted"},{"name":"agents"}]}]}'
@@ -63,6 +65,10 @@ var() { awk -F'\t' -v n="$1" '$1 == n {print $2}' "$VARS"; }
   run "$REPO_ROOT/runner/ci-provider.sh" o/r vps
   [ "$status" -eq 0 ]
   [ "$(var CI_RUNNER)" = "ci" ] && [ "$(var CI_RUNNER_8)" = "ci" ]
+  run "$REPO_ROOT/runner/ci-provider.sh" o/r vps
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CI_RUNNER=ci"* && "$output" == *"CI_RUNNER_8=ci"* ]]
+  [ "$(wc -l < "$VARS")" -eq 3 ]
 }
 
 @test "vps refuses without an online ci runner and changes nothing" {
@@ -72,6 +78,17 @@ var() { awk -F'\t' -v n="$1" '$1 == n {print $2}' "$VARS"; }
   [ "$status" -ne 0 ]
   [[ "$output" == *"setup-ci-user.sh"* ]]
   [ "$(var CI_RUNNER)" = "depot-ubuntu-24.04" ]
+}
+
+@test "vps refuses a public repo even when a ci runner is online" {
+  export REPO_VISIBILITY=public
+  printf 'CI_RUNNER\tdepot-ubuntu-24.04\n' > "$VARS"
+  run "$REPO_ROOT/runner/ci-provider.sh" o/r vps
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"repo privado"* ]]
+  [ "$(var CI_RUNNER)" = "depot-ubuntu-24.04" ]
+  ! grep -q "/actions/runners" "$GH_CALLS"
+  ! grep -q "variable set" "$GH_CALLS"
 }
 
 @test "an unknown provider is refused with the list of providers" {

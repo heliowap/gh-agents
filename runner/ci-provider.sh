@@ -26,6 +26,10 @@ case "$PROVIDER" in
 esac
 
 if [ "$PROVIDER" = vps ]; then
+  # shellcheck disable=SC1091 # lib.sh sits next to this script by convention
+  source "$(dirname "$0")/lib.sh"
+  echo "==> verificando visibilidade de $REPO"
+  require_private_repo "$REPO"
   # sem runner `ci` online os jobs ficariam na fila para sempre
   online="$(gh api "repos/$REPO/actions/runners" \
     --jq '[.runners[] | select(.status == "online" and ([.labels[].name] | index("ci")))] | length')"

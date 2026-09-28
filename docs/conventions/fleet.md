@@ -19,6 +19,11 @@
   once so units start at boot.
 - `enable-*.sh` checks repo visibility and refuses public repos — a runner on
   a public repo is remote code execution for every fork.
+- `RUNNER_ROLE` (default `agents`) is the runner's label; any other role also
+  goes in the name (`<escopo>-<role>-<n>`) and registers with
+  `--no-default-labels`. CI runners (`ci`) run under their own user with
+  rootless Docker (`setup-ci-user.sh`), never as `gh-agents` and never in the
+  `docker` group.
 
 ## Runtime image
 

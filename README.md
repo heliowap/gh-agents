@@ -211,5 +211,26 @@ Scripts under `runner/` run on `intrador-tech-vps` as user `gh-agents`:
 | `disable-org.sh <org>` | Same for org runners |
 | `status.sh` | Local dirs, systemd units, registered runners per scope |
 | `install-cleanup.sh` | Install the daily `_work` cleanup timer (sudo) |
+| `setup-ci-user.sh [user=gh-ci]` | Prepare the separate CI user with rootless Docker (sudo) |
 
 All are idempotent and end by proving the state they claim.
+
+### CI runners
+
+A repo's regular CI can run on the host too, but never as `gh-agents`: CI runs
+PR code directly on the host, and `gh-agents`' home holds every fleet runner's
+credentials and the ChatGPT login. CI runners live under a separate user
+(`gh-ci`) with its own rootless Docker and no access to that home:
+
+```bash
+sudo runner/setup-ci-user.sh            # once; ends proving the isolation
+sudo -iu gh-ci env RUNNER_ROLE=ci DOCKER_HOST=unix:///run/user/$(id -u gh-ci)/docker.sock \
+  GH_TOKEN="$(gh auth token)" bash -lc '~/gh-agents/runner/enable-repo.sh owner/repo 3'
+```
+
+`RUNNER_ROLE=ci` registers runners named `<scope>-ci-<n>` with only the `ci`
+label (`--no-default-labels`): they never take the agent runners'
+registration, and an agent job asking for `self-hosted` never lands on them.
+The repo opts in with `runs-on: ${{ vars.CI_RUNNER || '<hosted label>' }}` and
+`gh variable set CI_RUNNER --body ci`. The host has 4 vCPUs shared with the
+agents; expect a slower heavy tier than on hosted runners.

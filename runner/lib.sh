@@ -2,8 +2,23 @@
 # Shared helpers for the fleet scripts. Source this; do not execute it.
 # GH_AGENTS_HOME is overridable for tests; production default is the fleet user.
 
-GH_AGENTS_HOME="${GH_AGENTS_HOME:-/home/gh-agents}"
+# Papel dos runners que esta chamada gerencia: `agents` (padrão — os jobs do
+# gh-agents, usuário gh-agents) ou outro rótulo, como `ci`, para runners de CI
+# num usuário separado (sem acesso às credenciais da fleet nem ao login
+# ChatGPT). O papel é o rótulo; papel não-padrão entra no nome e registra só o
+# próprio rótulo (--no-default-labels): assim o `--replace` nunca toma o
+# registro de um runner de agents do mesmo repo, e job que pede `self-hosted`
+# nunca cai num runner de CI.
+RUNNER_ROLE="${RUNNER_ROLE:-agents}"
+if [ "$RUNNER_ROLE" = agents ]; then
+  GH_AGENTS_HOME="${GH_AGENTS_HOME:-/home/gh-agents}"
+else
+  GH_AGENTS_HOME="${GH_AGENTS_HOME:-$HOME}"
+fi
 RUNNERS_DIR="$GH_AGENTS_HOME/runners"
+# `sudo -iu <usuário>` não define XDG_RUNTIME_DIR, e sem ele `systemctl --user`
+# não acha o barramento ("Failed to connect to bus").
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 # Units de usuário (systemctl --user) — sem sudo. Override só para testes.
 UNIT_DIR="${GH_AGENTS_UNIT_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"
 
@@ -15,6 +30,17 @@ scope_repo() { echo "${1%%/*}--${1##*/}"; }   # owner/repo -> owner--repo
 scope_org()  { echo "org--$1"; }
 
 runner_dir() { echo "$RUNNERS_DIR/$1/$2"; }
+
+runner_name() {                                   # <escopo> <n>
+  if [ "$RUNNER_ROLE" = agents ]; then echo "$1-$2"; else echo "$1-$RUNNER_ROLE-$2"; fi
+}
+
+# Argumentos de rótulo do config.sh para o papel atual, um por linha
+# (`mapfile -t args < <(runner_label_args)`).
+runner_label_args() {
+  printf '%s\n' --labels "$RUNNER_ROLE"
+  [ "$RUNNER_ROLE" = agents ] || printf '%s\n' --no-default-labels
+}
 
 # Self-hosted on a public repo is RCE for every fork — refuse before any work.
 require_private_repo() {
@@ -78,6 +104,7 @@ After=network-online.target
 [Service]
 ExecStart=$dir/runsvc.sh
 WorkingDirectory=$dir
+${DOCKER_HOST:+Environment=DOCKER_HOST=$DOCKER_HOST}
 KillMode=process
 KillSignal=SIGTERM
 TimeoutStopSec=5min

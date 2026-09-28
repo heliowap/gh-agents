@@ -109,3 +109,39 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"já configurado"* || "$output" == *"already"* ]]
 }
+
+# A fresh runner dir whose config.sh records its arguments.
+stub_runner_tarball() {
+  cat > "$STUB/tar" <<'EOF2'
+#!/usr/bin/env bash
+mkdir -p bin
+printf '#!/usr/bin/env bash\necho "config.sh $*" >> "$GH_CALLS"\ntouch .runner\n' > config.sh
+touch bin/runsvc.sh; chmod +x config.sh bin/runsvc.sh
+EOF2
+  chmod +x "$STUB/tar"
+}
+
+@test "enable-repo registers agent runners as before" {
+  stub_runner_tarball
+  run "$REPO_ROOT/runner/enable-repo.sh" owner/repo 1
+  [ "$status" -eq 0 ]
+  grep -q -- "--name owner--repo-1 --labels agents" "$GH_CALLS"
+  ! grep -q -- "--no-default-labels" "$GH_CALLS"
+}
+
+@test "RUNNER_ROLE=ci registers ci-only runners that cannot collide with agent runners" {
+  stub_runner_tarball
+  RUNNER_ROLE=ci run "$REPO_ROOT/runner/enable-repo.sh" owner/repo 1
+  [ "$status" -eq 0 ]
+  # a distinct name: --replace would otherwise take over the agent runner's registration
+  grep -q -- "--name owner--repo-ci-1 --labels ci --no-default-labels" "$GH_CALLS"
+  [ -f "$GH_AGENTS_UNIT_DIR/actions.runner.owner--repo-ci-1.service" ]
+}
+
+@test "DOCKER_HOST reaches the runner unit (rootless Docker)" {
+  stub_runner_tarball
+  DOCKER_HOST=unix:///run/user/1234/docker.sock run "$REPO_ROOT/runner/enable-repo.sh" owner/repo 1
+  [ "$status" -eq 0 ]
+  grep -q "^Environment=DOCKER_HOST=unix:///run/user/1234/docker.sock$" \
+    "$GH_AGENTS_UNIT_DIR/actions.runner.owner--repo-1.service"
+}

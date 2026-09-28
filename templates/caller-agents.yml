@@ -28,20 +28,21 @@ permissions:
 jobs:
   agents:
     uses: heliowap/gh-agents/.github/workflows/agents.yml@v1
-    # Only trusted PR commands enter concurrency. Otherwise an unrelated
-    # comment can replace a pending /oc request; plain issues never run fix.
+    # Only trusted /oc commands enter concurrency. Ordinary issue commands
+    # reach the callee, which runs fixes only when allow_issue_fix is true.
     # Reviews are manual: `/oc review` from any human in a private repo (only
     # people with access can comment there); every other /oc, and anything
     # in a public repo, needs OWNER/MEMBER/COLLABORATOR. Never a bot.
     if: >-
       github.event_name == 'workflow_run'
       || (
-        ((github.event_name == 'issue_comment' && github.event.issue.pull_request)
+        (github.event_name == 'issue_comment'
           || github.event_name == 'pull_request_review_comment')
         && github.event.comment.user.type != 'Bot'
         && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode'))
         && (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
           || (github.event.repository.private
+            && (github.event_name == 'pull_request_review_comment' || github.event.issue.pull_request)
             && (contains(github.event.comment.body, '/oc review') || contains(github.event.comment.body, '/opencode review'))))
       )
     # The caller job gates concurrency before invoking the callee; the callee
@@ -75,5 +76,6 @@ jobs:
     #   runs-on: self-hosted        # default; vars.AGENT_RUNNER overrides per repo
     #   model: opencode-go/glm-5.3-flash
     #   model_fallbacks: 'a/1,b/2'  # probed in order; first responding model wins
+    #   allow_issue_fix: true      # /oc on ordinary issues opens a PR for changes
     #   use_container: true         # false = run on host (tests needing Docker)
     #   ci_workflows: 'ci,qe'       # empty = all; widen `workflows:` above to match

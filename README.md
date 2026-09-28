@@ -54,6 +54,7 @@ another org or account maps it explicitly, or the key arrives empty:
 | `runs-on` | `self-hosted` | Runner label fallback; the repo's `vars.AGENT_RUNNER` wins. |
 | `model` | `opencode-go/glm-5.3-flash` | OpenCode model for all agents: `provider/model`, or `provider/model#variant` to set the reasoning effort (`openai/gpt-6-luna#xhigh`). |
 | `model_fallbacks` | empty | Comma-separated `provider/model` fallbacks; every candidate is live-probed and the first that answers is used. |
+| `allow_issue_fix` | `false` | Accept `/oc` fixes on ordinary issues from OWNER/MEMBER/COLLABORATOR; changes open a PR against the default branch. |
 | `use_container` | `true` | Run jobs in the runtime image; `false` runs on the host. |
 | `runtime_image` | `ghcr.io/heliowap/gh-agents-runtime:v1` | Job image when `use_container` is true. |
 | `gh_agents_ref` | `v1` | Ref of this repo used for default agents/skills/scripts. |
@@ -152,11 +153,13 @@ the host's, so an older job never undoes a newer refresh. Host-mode jobs
 
 Limits:
 
-- Self-hosted runners only. A GitHub-hosted runner has no such file; the
-  preflight fails naming `AGENT_OPENCODE_AUTH`.
+- A GitHub-hosted runner has no shared ChatGPT login file. Without a
+  credentialed fallback, preflight fails naming `AGENT_OPENCODE_AUTH`.
 - Every repo that sets the variable spends the same ChatGPT account's limits.
-- Two jobs that refresh at the same moment can race: one of them fails with an
-  auth error. Re-run it. If the login stays broken, log in again (step 1).
+- Two jobs that refresh at the same moment can race. Re-run the failed job.
+  If the login stays broken, log in again (step 1). When `model_fallbacks`
+  includes an API-key model with credentials, a missing login lets the job
+  probe that fallback instead.
 - The `/oc` fixer and the reviewer run shell commands in the job, so they can
   read the login, just as they can read the provider keys in their
   environment. Enable it only where you already trust the agents with keys.
@@ -182,8 +185,11 @@ Limits:
 - **fix** — on PR comments containing `/oc` or `/opencode` (other than
   `/oc review`), only from OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
   coarse pre-filter (`/ocaml` can queue a wasted run, never a wrong edit); the
-  action's own mention parsing is the real gate. It commits to the PR branch;
-  commands on ordinary issues do not run.
+  action's own mention parsing is the real gate. It commits to the PR branch.
+  Commands on ordinary issues do not run by default. Set `allow_issue_fix: true`
+  in the shipped caller workflow to accept them. When an issue fix produces
+  changes, the action creates a new branch and opens a PR against the default
+  branch.
 - **ci-doctor** — on `workflow_run` completed with `failure`: finds the
   associated PR, posts one diagnosis (probable cause, log evidence, suggested
   fix) ending in `<!-- ci-doctor:<sha> -->`, which is also the dedup key — one

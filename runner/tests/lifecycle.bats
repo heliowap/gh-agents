@@ -60,3 +60,14 @@ teardown() { rm -rf "$TEST_HOME"; }
   run "$REPO_ROOT/runner/status.sh"
   [ "$status" -eq 0 ]
 }
+
+@test "disable-repo with RUNNER_ROLE=ci uninstalls the ci unit name" {
+  mkdir -p "$GH_AGENTS_UNIT_DIR"
+  touch "$GH_AGENTS_UNIT_DIR/actions.runner.own--rep-ci-1.service"
+  touch "$GH_AGENTS_UNIT_DIR/actions.runner.own--rep-1.service"
+  RUNNER_ROLE=ci run "$REPO_ROOT/runner/disable-repo.sh" own/rep
+  [ "$status" -eq 0 ]
+  [ ! -f "$GH_AGENTS_UNIT_DIR/actions.runner.own--rep-ci-1.service" ]
+  # the agent runner of the same repo is not touched
+  [ -f "$GH_AGENTS_UNIT_DIR/actions.runner.own--rep-1.service" ]
+}

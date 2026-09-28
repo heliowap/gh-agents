@@ -25,7 +25,7 @@ for dir in "$BASE"/*/; do
       token="$(repo_removal_token "$REPO")"
       ./config.sh remove --token "$token"
     fi
-    uninstall_user_unit "${SCOPE}-$(basename "${dir%/}")"
+    uninstall_user_unit "$(runner_name "$SCOPE" "$(basename "${dir%/}")")"
   )
   rm -rf "$dir"
 done

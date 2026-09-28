@@ -20,11 +20,12 @@ VERSION="$(latest_runner_version)"
 echo "==> $N runner(s) para $REPO em $RUNNERS_DIR/$SCOPE (actions-runner $VERSION)"
 
 mkdir -p "$RUNNERS_DIR/$SCOPE"
+mapfile -t label_args < <(runner_label_args)
 for i in $(seq 1 "$N"); do
   dir="$(runner_dir "$SCOPE" "$i")"
   if [ -f "$dir/.runner" ]; then
     echo "==> runner $i já configurado em $dir — garantindo unit"
-    install_user_unit "$dir" "${SCOPE}-${i}"
+    install_user_unit "$dir" "$(runner_name "$SCOPE" "$i")"
     continue
   fi
   echo "==> configurando runner $i em $dir"
@@ -39,11 +40,11 @@ for i in $(seq 1 "$N"); do
     ./config.sh --unattended \
       --url "https://github.com/$REPO" \
       --token "$token" \
-      --name "${SCOPE}-${i}" \
-      --labels agents \
+      --name "$(runner_name "$SCOPE" "$i")" \
+      "${label_args[@]}" \
       --work _work \
       --replace
-    install_user_unit "$dir" "${SCOPE}-${i}"
+    install_user_unit "$dir" "$(runner_name "$SCOPE" "$i")"
   )
 done
 

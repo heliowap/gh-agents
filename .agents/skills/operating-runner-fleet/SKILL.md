@@ -44,6 +44,26 @@ runner/status.sh                             # units + runners via API
 - Labels: `agents` plus the self-hosted/linux/x64 defaults. Repo-level
   runners only see their own repo.
 
+## CI runners (separate user)
+
+CI runs PR code on the host, so it never runs as `gh-agents` (whose home
+holds all runner credentials and the ChatGPT login). `setup-ci-user.sh`
+creates `gh-ci` with rootless Docker, outside the `docker` group, and proves
+it cannot read `/home/gh-agents`:
+
+```bash
+sudo runner/setup-ci-user.sh
+sudo -iu gh-ci env RUNNER_ROLE=ci DOCKER_HOST=unix:///run/user/$(id -u gh-ci)/docker.sock \
+  GH_TOKEN="$(gh auth token)" bash -lc '~/gh-agents/runner/enable-repo.sh <owner>/<repo> 3'
+```
+
+- `RUNNER_ROLE=ci` → name `<escopo>-ci-<n>`, label `ci` only. The same
+  variable goes on `disable-repo.sh`; without it the script targets the
+  agent runners.
+- Never add `gh-ci` to the `docker` group: that is root on the host.
+- `install-cleanup.sh` covers `gh-agents` only; CI `_work` dirs are not
+  cleaned automatically yet.
+
 ## ChatGPT login (`openai/*` models)
 
 One shared login for every repo that sets `vars.AGENT_OPENCODE_AUTH`

@@ -30,6 +30,8 @@ checklist for changing it.
       reach `run:` via `env:`, never `${{ }}` inside the script.
 - [ ] Comment-trigger `if:` gates on `user.type != 'Bot'` and
       `author_association` ∈ OWNER/MEMBER/COLLABORATOR. No bot triggers a bot.
+      Sole exception: `/oc review` in a private repo, open to any human
+      (AGENTS.md invariant 4). Anything that pushes stays collaborator-only.
 - [ ] Every `if:` encoding a rule carries a comment naming the rule.
 - [ ] External actions pinned by full SHA with a trailing version comment
       (`uses: actions/checkout@<sha> # v6`). The opencode action is pinned

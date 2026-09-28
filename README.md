@@ -1,7 +1,7 @@
 # gh-agents
 
-Reusable GitHub Actions workflow that runs OpenCode agents — automatic PR
-review, `/oc` fix on comments, CI-failure diagnosis — on a self-hosted runner
+Reusable GitHub Actions workflow that runs OpenCode agents — PR review on
+`/oc review`, `/oc` fix on comments, CI-failure diagnosis — on a self-hosted runner
 fleet. Enabled per repo by adding one caller workflow; no repo-side config is
 required beyond a secret.
 
@@ -139,21 +139,24 @@ Limits:
 
 ## What the agents do
 
-- **review** — on non-draft `pull_request` events (docs/`*.md` paths ignored):
+- **review** — only on request: comment `/oc review` on a PR. Nothing is
+  reviewed on push or when a PR opens. In a private repo any human can ask
+  (only people with access can comment there); in a public repo only
+  OWNER/MEMBER/COLLABORATOR. Never a bot. It reacts with 👀, then
   posts one comment with BLOCKING/WARNING/NIT sections, `path:line` on every
   finding, ending in `SUMMARY: N BLOCKING, N WARNING, N NIT`. When BLOCKING >
   0, a `review-blocking` issue is opened (one per PR; a closed one reopens).
   Only this run's review counts; with no `SUMMARY` line the step leaves a
   warning instead of guessing zero. The reviewer is read-only and never
-  approves — it comments, a human decides. The job pins the agent through
-  inline config (the opencode action ignores its `agent:` input) and then
-  checks the session: a review that did not run as `reviewer` fails red. The
-  `/oc` fixer gets the same pin and check. A `Review gate` job skips the
-  review, with a notice, when the actor that triggered it has only `read` or
-  no permission on the repo (typically a bot pushing to the PR); re-running
-  the workflow as a maintainer reviews it.
-- **fix** — on PR comments containing `/oc` or `/opencode`, only from
-  OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
+  approves — it comments, a human decides. The review runs `opencode run
+  --agent reviewer` directly, not the opencode GitHub action, because the
+  action refuses anyone without write permission. The session is then
+  checked: a review that did not run as `reviewer` fails red. The job holds
+  the provider keys, so the agent config that can grant permissions or run
+  code (`opencode.json(c)`, `.opencode/`, `.agents/skills/`) is taken from the
+  PR's base branch, never from the PR; plugins are off (`--pure`).
+- **fix** — on PR comments containing `/oc` or `/opencode` (other than
+  `/oc review`), only from OWNER/MEMBER/COLLABORATOR and never from a bot. The substring match is a
   coarse pre-filter (`/ocaml` can queue a wasted run, never a wrong edit); the
   action's own mention parsing is the real gate. It commits to the PR branch;
   commands on ordinary issues do not run.
@@ -177,7 +180,9 @@ win; a repo with neither gets this repo's defaults copied in at run time.
   visibility and refuses public repos; org runners sit in a private-only
   runner group.
 - Comment triggers require a non-bot OWNER/MEMBER/COLLABORATOR — no bot
-  triggers a bot.
+  triggers a bot. The one exception is `/oc review` in a private repo, open
+  to any human; the reviewer only reads and comments, with its config taken
+  from the base branch.
 - Jobs run in the runtime container by default. `use_container: false` runs on
   the host — use it only for repos whose tests need Docker, knowing the job
   then shares the runner host.

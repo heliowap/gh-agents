@@ -21,7 +21,6 @@
     "reviewer": {
       "mode": "primary",
       "description": "PR review in CI on `/oc review`: BLOCKING/WARNING/NIT format, path:line findings, never approves, never edits.",
-      "model": "opencode-go/glm-5.3-flash",
       "permission": {
         "edit": "deny",
         "webfetch": "deny",
@@ -43,7 +42,6 @@
     "fixer": {
       "mode": "primary",
       "description": "Executes a fix request made via /oc or /opencode comment on a PR. Write-capable by design: the requester asked for a change.",
-      "model": "opencode-go/glm-5.3-flash",
       "permission": {
         "webfetch": "deny",
         "websearch": "deny"
@@ -53,7 +51,6 @@
     "ci-doctor": {
       "mode": "primary",
       "description": "Diagnoses a failed workflow run and posts one diagnosis comment on the associated PR. Diagnosis only — fixing is a human decision or an /oc request.",
-      "model": "opencode-go/glm-5.3-flash",
       "permission": {
         "edit": "deny",
         "webfetch": "deny",
